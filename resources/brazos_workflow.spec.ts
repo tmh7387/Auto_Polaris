@@ -15,7 +15,7 @@ const CONFIG = {
         password: process.env.BRAZOS_PASSWORD || ''
     },
     filters: {
-        fleet: 'BH1-AW139',
+        fleet: 'WH1-AW139',
         eventStatus: ['Open', 'In Progress'],
         eventValidity: ['Valid', 'Auto Valid', 'Pending'],
         severity: '3'
