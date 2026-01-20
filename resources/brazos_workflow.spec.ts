@@ -95,10 +95,16 @@ async function applyFilters(page: Page) {
 
     // Severity filter (checkboxes for Level 1, 2, 3)
     console.log(`Setting severity filter: ${CONFIG.filters.severity}`);
-    const severityLevel = parseInt(CONFIG.filters.severity);
-    if (severityLevel >= 1) await page.check('#id_level_1');
-    if (severityLevel >= 2) await page.check('#id_level_2');
-    if (severityLevel >= 3) await page.check('#id_level_3');
+    const severityStr = CONFIG.filters.severity.toString();
+
+    // Uncheck all first (optional, but good practice if state persists)
+    // await page.uncheck('#id_level_1');
+    // await page.uncheck('#id_level_2');
+    // await page.uncheck('#id_level_3');
+
+    if (severityStr.includes('1')) await page.check('#id_level_1');
+    if (severityStr.includes('2')) await page.check('#id_level_2');
+    if (severityStr.includes('3')) await page.check('#id_level_3');
 
     // Click search button
     console.log('Submitting search...');
