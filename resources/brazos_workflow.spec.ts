@@ -17,7 +17,7 @@ const CONFIG = {
     filters: {
         fleet: 'WH1-AW139',
         eventStatus: ['Open', 'In Progress'],
-        eventValidity: ['Valid', 'Auto Valid', 'Pending'],
+        eventValidity: ['Pending'],
         severity: '3'
     }
 };
@@ -77,21 +77,18 @@ async function applyFilters(page: Page) {
     // Event Status filter (multi-select)
     // Values: OPEN, IN_PROGRESS, CLOSED
     console.log(`Setting event status: ${CONFIG.filters.eventStatus.join(', ')}`);
-    for (const status of CONFIG.filters.eventStatus) {
-        const value = status.toUpperCase().replace(' ', '_');
-        await page.selectOption('#id_status', value);
-    }
+    const statusValues = CONFIG.filters.eventStatus.map(s => s.toUpperCase().replace(' ', '_'));
+    await page.selectOption('#id_status', statusValues);
 
     // Event Validity filter (multi-select)
     // Values: MANUAL_VALID (Valid), AUTO_VALID, INVALID, PENDING
     console.log(`Setting event validity: ${CONFIG.filters.eventValidity.join(', ')}`);
-    for (const validity of CONFIG.filters.eventValidity) {
-        let value = validity;
-        if (validity === 'Valid') value = 'MANUAL_VALID';
-        if (validity === 'Auto Valid') value = 'AUTO_VALID';
-        value = value.toUpperCase().replace(' ', '_');
-        await page.selectOption('#id_validity', value);
-    }
+    const validityValues = CONFIG.filters.eventValidity.map(v => {
+        if (v === 'Valid') return 'MANUAL_VALID';
+        if (v === 'Auto Valid') return 'AUTO_VALID';
+        return v.toUpperCase().replace(' ', '_');
+    });
+    await page.selectOption('#id_validity', validityValues);
 
     // Severity filter (checkboxes for Level 1, 2, 3)
     console.log(`Setting severity filter: ${CONFIG.filters.severity}`);
@@ -117,60 +114,75 @@ async function applyFilters(page: Page) {
 }
 
 /**
- * Extract data from the results table
+ * Download data as CSV
  */
-async function extractData(page: Page) {
-    console.log('Extracting data...');
+async function downloadData(page: Page) {
+    console.log('Initiating CSV download...');
 
-    // Wait for results to load
+    // Wait for results to load (checking table presence to ensure search finished)
     try {
-        console.log('Waiting for results table...');
-        // Wait up to 30s for the table rows
         await page.waitForSelector('#event-search-list tr.jqgrow', { state: 'attached', timeout: 30000 });
-        console.log('Results table found and populated');
+        console.log('Results table populated.');
     } catch (e) {
-        console.log('No results found (table empty) or timed out. Taking debug screenshot...');
-        await page.screenshot({ path: 'env/tmp/debug-no-results.png', fullPage: true });
-        console.log('Debug screenshot saved: env/tmp/debug-no-results.png');
-        return [];
+        console.log('No results found or timed out. Taking debug screenshot...');
+        await page.screenshot({ path: 'env/tmp/debug-download-no-results.png', fullPage: true });
+        return null;
     }
 
-    // Capture results screenshot (if successful)
-    await page.screenshot({
-        path: 'env/tmp/05-search-results.png',
-        fullPage: true
-    });
-    console.log('Screenshot saved: env/tmp/05-search-results.png');
+    // Capture results screenshot for verification
+    await page.screenshot({ path: 'env/tmp/06-pre-download.png', fullPage: true });
 
-    // Extract data from table rows
-    const data = await page.$$eval('#event-search-list tr.jqgrow', rows => {
-        return rows.map(row => {
-            // Helper to get text from cell by aria-describedby ID
-            const getText = (colId: string) => {
-                const cell = row.querySelector(`td[aria-describedby="event-search-list_${colId}"]`);
-                return cell ? cell.textContent?.trim() || '' : '';
-            };
+    // Setup download listener
+    const downloadPromise = page.waitForEvent('download');
 
-            return {
-                reference: getText('flight__id'),
-                fleet: getText('flight__aircraft__fleet__name'),
-                status: getText('status'),
-                validity: getText('validity'),
-                severity: getText('threshold__level'),
-                dateTime: getText('datetime'),
-                description: getText('threshold__definition__abbreviation'),
-                aircraft: getText('flight__aircraft__registration'),
-                flightNumber: getText('flight__flight_number')
-            };
-        });
-    });
+    // Click the export/download button
+    // Strategy: Look for title="Export to CSV" or specific class structure
+    try {
+        console.log('Attempting to find download button...');
+        // Wait for the toolbar to be visible first
+        await page.waitForSelector('.ui-jqgrid-titlebar, .ui-userdata', { timeout: 5000 }).catch(() => console.log('Toolbar not found immediately'));
 
-    console.log(`Extracted ${data.length} records.`);
-    if (data.length > 0) {
-        console.log('Sample record:', data[0]);
+        // Try multiple selectors
+        const exportSelectors = [
+            '[title="Download as CSV"]', // Specific title provided by user
+            '.ui-jqgrid-titlebar [title="Download as CSV"]',
+            '.ui-jqgrid-titlebar .buttons a[title="Download as CSV"]',
+            // Fallbacks
+            'td[title="Export to CSV"]',
+            '.ui-icon-arrowthickstop-1-s'
+        ];
+
+        let clicked = false;
+        for (const selector of exportSelectors) {
+            if (await page.$(selector)) {
+                console.log(`Found download button with selector: ${selector}`);
+                await page.click(selector);
+                clicked = true;
+                break;
+            }
+        }
+
+        if (!clicked) {
+            console.log('Standard selectors failed. Dumping page HTML for debugging...');
+            const html = await page.content();
+            // In a real scenario we might save this to a file, here we just throw
+            throw new Error('Download button not found with any known selector');
+        }
+
+    } catch (e) {
+        console.log('Could not click download button with standard selectors. Attempting fallback...');
+        // Fallback to coordinates or broader search if needed in future
+        throw new Error('Download button not found');
     }
 
-    return data;
+    const download = await downloadPromise;
+    const filePath = 'resources/brazos_pending_events.csv';
+
+    // Save to resources
+    await download.saveAs(filePath);
+    console.log(`CSV saved to: ${filePath}`);
+
+    return filePath;
 }
 
 /**
@@ -190,11 +202,11 @@ test('Brazos data extraction workflow', async ({ page }) => {
         // Phase 3: Apply filters
         await applyFilters(page);
 
-        // Phase 4: Extract data
-        const data = await extractData(page);
+        // Phase 4: Download CSV
+        const csvPath = await downloadData(page);
 
         console.log('Workflow completed successfully');
-        // console.log('Extracted data:', data);
+        if (csvPath) console.log('Data saved to:', csvPath);
 
     } catch (error) {
         console.error('Workflow failed:', error);
