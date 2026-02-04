@@ -1,3 +1,2 @@
 ﻿Reference,Flight Number,Fleet,Aircraft,Takeoff IATA,Landing IATA,Level,Event Short Desc,Graph,Code,Event Datetime,Value,Threshold,Type,Validity,Status,Modified,First Comment,Latest Comment
-68199568,,WH1-AW139,VH-ZXB,,TMW,3,Pitch lo 35-400ft,68199568,TPA012,2026-01-16 13:04:20Z,-17.2 deg,≤ -17.0 deg,Safety,Pending,Open,"3 days, 16 hours ago",,
-68169622,,WH1-AW139,VH-ZXA,,OOL,3,Eng Torque Low Below 300ft AGL,68169622,ETB300,2026-01-15 10:45:28Z,16.0 %,< 17.0 %,Safety,Pending,Open,"4 days, 16 hours ago",,
+68634752,,WH1-AW139,VH-ZXB,,,3,Eng Torque Low Below 300ft AGL,68634752,ETB300,2026-02-01 05:20:47Z,14.9 %,< 17.0 %,Safety,Pending,Open,"2 days, 13 hours ago",,
