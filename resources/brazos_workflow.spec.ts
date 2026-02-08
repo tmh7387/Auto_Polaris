@@ -81,23 +81,25 @@ async function applyFilters(page: Page) {
     await page.selectOption('#id_status', statusValues);
 
     // Event Validity filter (multi-select)
-    // Values: MANUAL_VALID (Valid), AUTO_VALID, INVALID, PENDING
-    console.log(`Setting event validity: ${CONFIG.filters.eventValidity.join(', ')}`);
-    const validityValues = CONFIG.filters.eventValidity.map(v => {
-        if (v === 'Valid') return 'MANUAL_VALID';
-        if (v === 'Auto Valid') return 'AUTO_VALID';
-        return v.toUpperCase().replace(' ', '_');
-    });
-    await page.selectOption('#id_validity', validityValues);
+    console.log(`Setting event validity to strictly: PENDING`);
+    // Clear selections first to be safe
+    await page.selectOption('#id_validity', []);
+    // Select ONLY 'PENDING'
+    await page.selectOption('#id_validity', ['PENDING']);
+
+    // Verify selection (for debug)
+    const selectedValidity = await page.$eval('#id_validity', (el: HTMLSelectElement) =>
+        Array.from(el.selectedOptions).map(o => o.value)
+    );
+    console.log('Final Selected Validity:', selectedValidity);
 
     // Severity filter (checkboxes for Level 1, 2, 3)
     console.log(`Setting severity filter: ${CONFIG.filters.severity}`);
     const severityStr = CONFIG.filters.severity.toString();
 
-    // Uncheck all first (optional, but good practice if state persists)
-    // await page.uncheck('#id_level_1');
-    // await page.uncheck('#id_level_2');
-    // await page.uncheck('#id_level_3');
+    // Uncheck all first
+    await page.uncheck('#id_level_1');
+    await page.uncheck('#id_level_2');
 
     if (severityStr.includes('1')) await page.check('#id_level_1');
     if (severityStr.includes('2')) await page.check('#id_level_2');
@@ -119,15 +121,20 @@ async function applyFilters(page: Page) {
 async function downloadData(page: Page) {
     console.log('Initiating CSV download...');
 
-    // Wait for results to load (checking table presence to ensure search finished)
-    try {
-        await page.waitForSelector('#event-search-list tr.jqgrow', { state: 'attached', timeout: 30000 });
-        console.log('Results table populated.');
-    } catch (e) {
-        console.log('No results found or timed out. Taking debug screenshot...');
-        await page.screenshot({ path: 'env/tmp/debug-download-no-results.png', fullPage: true });
-        return null;
-    }
+    // Log the list of events found
+    const eventIds = await page.evaluate(() => {
+        const rows = Array.from(document.querySelectorAll('#event-search-list tr.jqgrow'));
+        return rows.map(row => {
+            // Usually the reference is in a specific column, let's look for the one with the link or specific class
+            const refCell = row.querySelector('td[aria-describedby="event-search-list_reference"]') ||
+                row.querySelector('td:nth-child(4)'); // Column 4 is usually reference
+            return refCell ? refCell.textContent?.trim() : 'Unknown';
+        });
+    });
+    console.log('--- PENDING EVENTS FOUND ---');
+    console.log(eventIds.join(', '));
+    console.log('Total:', eventIds.length);
+    console.log('----------------------------');
 
     // Capture results screenshot for verification
     await page.screenshot({ path: 'env/tmp/06-pre-download.png', fullPage: true });

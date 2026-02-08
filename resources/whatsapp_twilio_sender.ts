@@ -11,15 +11,16 @@ async function sendWhatsAppNotifications() {
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const authToken = process.env.TWILIO_AUTH_TOKEN;
     const fromNumber = process.env.TWILIO_WHATSAPP_FROM;
+    const messagingServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID;
     const toNumber = process.env.TWILIO_WHATSAPP_TO;
     const contentSid = process.env.TWILIO_CONTENT_SID;
 
-    if (!accountSid || !authToken || !fromNumber || !toNumber) {
-        throw new Error('Twilio credentials (SID, Token, From, To) must be set in .env');
+    if (!accountSid || !authToken || (!fromNumber && !messagingServiceSid) || !toNumber) {
+        throw new Error('Twilio credentials (SID, Token, From/MessagingServiceSID, To) must be set in .env');
     }
 
     console.log('--- WHATSAPP SENDER START ---');
-    console.log(`Config: From=${fromNumber}, To=${toNumber}, ContentSID=${contentSid}`);
+    console.log(`Config: From=${fromNumber}, MessagingService=${messagingServiceSid}, To=${toNumber}, ContentSID=${contentSid}`);
 
     const client = twilio(accountSid, authToken);
     const notificationsDir = 'env/assets/notifications';
@@ -49,18 +50,31 @@ async function sendWhatsAppNotifications() {
         const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
         const messageBody = fs.readFileSync(msgPath, 'utf-8');
 
+        // Extract variables for multi-event or single-event structure
+        let eventCodes = metadata.Code || "-";
+        let eventDescs = metadata['Event Short Desc'] || "-";
+        let eventDate = metadata.localDateString || "-";
+        let flightUrl = metadata.flightUrl || "-";
+
+        if (metadata.events && Array.isArray(metadata.events)) {
+            eventCodes = metadata.events.map((e: any) => e.Code).join(' & ');
+            eventDescs = metadata.events.map((e: any) => e['Event Short Desc']).join(' & ');
+            eventDate = metadata.events[0].localDateString || "-";
+        }
+
         try {
             if (contentSid) {
                 console.log(`  Sending via Content API (Template)...`);
                 const message = await client.messages.create({
                     contentSid: contentSid,
                     contentVariables: JSON.stringify({
-                        "1": metadata.Code || "-",
-                        "2": metadata['Event Short Desc'] || "-",
-                        "3": metadata.localDateString || "-",
-                        "4": metadata.flightUrl || "-"
+                        "1": eventCodes,
+                        "2": eventDescs,
+                        "3": eventDate,
+                        "4": flightUrl
                     }),
-                    from: fromNumber,
+                    messagingServiceSid: messagingServiceSid,
+                    from: messagingServiceSid ? undefined : fromNumber,
                     to: toNumber
                 });
                 console.log(`  ✓ SID: ${message.sid}`);
@@ -68,7 +82,8 @@ async function sendWhatsAppNotifications() {
                 console.log(`  Sending via Sandbox Body...`);
                 const message = await client.messages.create({
                     body: messageBody,
-                    from: fromNumber,
+                    messagingServiceSid: messagingServiceSid,
+                    from: messagingServiceSid ? undefined : fromNumber,
                     to: toNumber
                 });
                 console.log(`  ✓ SID: ${message.sid}`);

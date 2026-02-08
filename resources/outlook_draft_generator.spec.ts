@@ -47,14 +47,14 @@ test('Create Outlook drafts for processed events', async ({ page }) => {
             await createDraft(page, ref);
             await page.waitForTimeout(5000);
             console.log(`✓ Draft finished for ${ref}`);
-            // Reload to clear compose area for next draft
-            await page.reload();
-            await page.waitForTimeout(10000);
+            // Use goto instead of reload for a cleaner state reset
+            await page.goto(CONFIG.outlookUrl);
+            await page.waitForTimeout(15000);
         } catch (error) {
             console.error(`Failed to create draft for ${ref}:`, error);
             await page.screenshot({ path: `env/logs/error_${ref}_ui.png` });
-            await page.reload();
-            await page.waitForTimeout(10000);
+            await page.goto(CONFIG.outlookUrl);
+            await page.waitForTimeout(15000);
         }
     }
 });
@@ -64,10 +64,26 @@ async function createDraft(page: any, ref: string) {
     const metadataPath = path.join(eventDir, 'metadata.json');
     if (!fs.existsSync(metadataPath)) return;
 
-    const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'));
-    const subject = `WESTPAC FDM LEVEL 3 - ${metadata['Event Short Desc']}`;
+    const metadataJson = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'));
+
+    // Handle both old and new metadata structure
+    const eventList = metadataJson.events ? metadataJson.events : [metadataJson];
+    const uniqueDescs = [...new Set(eventList.map((e: any) => e['Event Short Desc']))];
+    const subject = `WESTPAC FDM LEVEL 3 - ${uniqueDescs.join(' and ')}`;
 
     console.log(`Creating draft: ${ref}`);
+
+    // Ensure we are in a clean state by clicking Discard if an old compose window is open
+    try {
+        const discardBtn = page.getByRole('button', { name: /Discard/i }).first();
+        if (await discardBtn.isVisible()) {
+            console.log('Closing old compose window...');
+            await discardBtn.click();
+            await page.waitForTimeout(2000);
+            const confirmDiscard = page.getByRole('button', { name: /OK/i }).or(page.getByRole('button', { name: /Discard/i }));
+            if (await confirmDiscard.isVisible()) await confirmDiscard.click();
+        }
+    } catch (e) { }
 
     // New Mail
     await page.getByRole('button', { name: /New mail/i }).first().click();
@@ -131,24 +147,24 @@ async function createDraft(page: any, ref: string) {
     }, { content: htmlDraft });
     await page.waitForTimeout(2000);
 
-    // 5. Attachments
-    const attachments = ['pfd.png', 'table.png'];
-    for (const file of attachments) {
+    // 5. Attachments - Capture all visual evidence files
+    const allFiles = fs.readdirSync(eventDir);
+    const evidenceFiles = allFiles.filter(f => f.startsWith('pfd_') || f.startsWith('table_'));
+
+    for (const file of evidenceFiles) {
         const filePath = path.resolve(path.join(eventDir, file));
-        if (fs.existsSync(filePath)) {
-            console.log(`Attaching ${file}...`);
-            try {
-                const [fileChooser] = await Promise.all([
-                    page.waitForEvent('filechooser'),
-                    page.getByRole('button', { name: /Attach/i }).first().click().then(() =>
-                        page.getByRole('menuitem', { name: /Browse this computer/i }).or(page.locator('button:has-text("Browse this computer")')).first().click()
-                    )
-                ]);
-                await fileChooser.setFiles(filePath);
-                await page.waitForTimeout(5000);
-            } catch (e) {
-                console.log(`Skipping ${file}`);
-            }
+        console.log(`Attaching ${file}...`);
+        try {
+            const [fileChooser] = await Promise.all([
+                page.waitForEvent('filechooser'),
+                page.getByRole('button', { name: /Attach/i }).first().click().then(() =>
+                    page.getByRole('menuitem', { name: /Browse this computer/i }).or(page.locator('button:has-text("Browse this computer")')).first().click()
+                )
+            ]);
+            await fileChooser.setFiles(filePath);
+            await page.waitForTimeout(3000); // Wait for upload
+        } catch (e) {
+            console.log(`Failed to attach ${file}, skipping.`);
         }
     }
 

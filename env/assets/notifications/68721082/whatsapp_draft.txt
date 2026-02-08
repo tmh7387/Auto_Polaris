@@ -1,0 +1,6 @@
+Hi WESTPAC FDM Team,
+
+Brazos Safety has identified 2 Level 3 events – FEX210 - Fuel qty low warn & ETB300 - Eng Torque Low Below 300ft AGL - Feb 04, 2026
+
+The link to the event is below:
+https://polaris.flightdataservices.com/flight/68721082/

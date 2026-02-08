@@ -31,6 +31,10 @@ const CONFIG = {
     polarisBaseUrl: 'https://polaris.flightdataservices.com'
 };
 
+interface EventGroup {
+    [ref: string]: CsvRecord[];
+}
+
 test('Generate notifications for pending events', async ({ page }) => {
     // 1. Prepare Environment
     if (!fs.existsSync(CONFIG.outputDir)) {
@@ -45,14 +49,23 @@ test('Generate notifications for pending events', async ({ page }) => {
     console.log(`Reading events from ${CONFIG.inputCsv}...`);
     const csvContent = fs.readFileSync(CONFIG.inputCsv, 'utf-8');
     const events = parseCsv(csvContent);
-    console.log(`Found ${events.length} events to process.`);
+    console.log(`Found ${events.length} event records.`);
 
     if (events.length === 0) {
         console.log('No events to process.');
         return;
     }
 
-    // 3. Login to Polaris (sharing session)
+    // 3. Group Events by Reference
+    const grouped: EventGroup = {};
+    for (const event of events) {
+        if (!grouped[event.Reference]) grouped[event.Reference] = [];
+        grouped[event.Reference].push(event);
+    }
+    const references = Object.keys(grouped);
+    console.log(`Grouped into ${references.length} unique flight references: ${references.join(', ')}`);
+
+    // 4. Login to Polaris (sharing session)
     console.log('Logging in to Polaris...');
     await page.goto(`${CONFIG.polarisBaseUrl}/accounts/login/`);
     await page.fill('#id_login', username);
@@ -61,98 +74,125 @@ test('Generate notifications for pending events', async ({ page }) => {
     await page.waitForURL(url => !url.href.includes('/accounts/login'));
     console.log('Login successful.');
 
-    // 4. Process Each Event
-    for (const event of events) {
+    // 5. Process Each Group
+    for (const ref of references) {
         try {
-            await processEvent(page, event);
+            await processEventGroup(page, ref, grouped[ref]);
         } catch (error) {
-            console.error(`Failed to process event ${event.Reference}:`, error);
+            console.error(`Failed to process group for flight ${ref}:`, error);
+            await page.screenshot({ path: `env/logs/error_process_${ref}.png`, fullPage: true });
         }
     }
 });
 
-async function processEvent(page: any, event: CsvRecord) {
-    const ref = event.Reference;
+async function processEventGroup(page: any, ref: string, group: CsvRecord[]) {
     const eventDir = path.join(CONFIG.outputDir, ref);
     if (!fs.existsSync(eventDir)) fs.mkdirSync(eventDir, { recursive: true });
 
-    console.log(`Processing Event ${ref} (${event.Code})...`);
+    console.log(`Processing Flight ${ref} (${group.length} events)...`);
 
-    // Determine Day/Night and Local Time
-    const utcDate = new Date(event['Event Datetime']);
-    const { localDateString, lightingCondition } = getEnrichedTime(utcDate);
+    const results: any[] = [];
 
-    // Navigate to Graph URL
+    // Navigate to Graph URL ONCE per flight
     const graphUrl = `${CONFIG.polarisBaseUrl}/flight/${ref}/graph/`;
     console.log(`Navigating to Base Graph: ${graphUrl}`);
     await page.goto(graphUrl);
     await page.waitForLoadState('networkidle');
-    await page.waitForSelector('.item.event', { timeout: 20000 });
-
-    // Find the specific event in the sidebar
-    // We match by the Event Short Desc from CSV (e.g. "Eng Torque Low Below 300ft AGL")
-    const eventShortDesc = event['Event Short Desc'];
-    console.log(`Locating event in sidebar: "${eventShortDesc}"`);
-
-    const eventItem = page.locator(`.item.event:has-text("${eventShortDesc}")`).first();
-    if (await eventItem.count() === 0) {
-        throw new Error(`Event "${eventShortDesc}" not found in sidebar for flight ${ref}`);
-    }
-
-    const eventId = await eventItem.getAttribute('data-key');
-    console.log(`Found Event ID: ${eventId}`);
-
-    // Navigate to the specific event moment
-    const specificUrl = `${graphUrl}#event=${eventId}`;
-    console.log(`Navigating to specific moment: ${specificUrl}`);
-    await page.goto(specificUrl);
-    await page.waitForLoadState('networkidle');
-
-    // Wait for the specific row to be selected in the table
     try {
-        await page.waitForSelector('tr.selected', { timeout: 10000 });
+        await page.waitForSelector('.item.event', { timeout: 30000 });
     } catch (e) {
-        console.warn('Timed out waiting for tr.selected, continuing with first available row.');
+        console.warn(`    Warning: No events (.item.event) found in sidebar for flight ${ref} after 30s.`);
+        const sidebarHtml = await page.locator('#sidebar').innerHTML().catch(() => 'sidebar not found');
+        console.log(`    Sidebar HTML snippet: ${sidebarHtml.substring(0, 500)}...`);
     }
 
-    await page.waitForTimeout(3000); // Settle time for rendering
+    for (let i = 0; i < group.length; i++) {
+        const event = group[i];
+        console.log(`  Sub-event ${i + 1}/${group.length}: ${event.Code} - ${event['Event Short Desc']}`);
 
-    const highlightedRow = page.locator('tr.selected, tr.event-row').first();
-    if (await highlightedRow.count() > 0) {
-        await highlightedRow.scrollIntoViewIfNeeded();
+        // For debugging, log all events in sidebar
+        const allSidebarEvents = await page.locator('.item.event').evaluateAll((els: HTMLElement[]) => els.map(el => el.textContent?.trim()));
+        console.log(`    Available sidebar events: ${JSON.stringify(allSidebarEvents)}`);
+
+        // 1. Locate and click event in sidebar
+        const eventShortDesc = event['Event Short Desc'];
+        const eventItem = page.locator(`.item.event:has-text("${eventShortDesc}")`).first();
+        if (await eventItem.count() === 0) {
+            console.warn(`    Warning: Event "${eventShortDesc}" not found in sidebar. Skipping.`);
+            continue;
+        }
+
+        const eventId = await eventItem.getAttribute('data-key');
+
+        // 2. Navigate to the specific event moment
+        const specificUrl = `${graphUrl}#event=${eventId}`;
+        await page.goto(specificUrl);
+        await page.waitForLoadState('networkidle');
+
+        // 3. Wait for the specific row to be selected in the table
+        try {
+            await page.waitForSelector('tr.selected', { timeout: 10000 });
+        } catch (e) { }
+
+        await page.waitForTimeout(3000); // Settle time
+
+        const highlightedRow = page.locator('tr.selected, tr.event-row').first();
+        if (await highlightedRow.count() > 0) {
+            await highlightedRow.scrollIntoViewIfNeeded();
+        }
+
+        // 4. Capture Screenshots
+        const pfdPath = path.join(eventDir, `pfd_${i + 1}.png`);
+        const tablePath = path.join(eventDir, `table_${i + 1}.png`);
+        await page.locator('#instruments').screenshot({ path: pfdPath });
+        await page.locator('#tabularData').screenshot({ path: tablePath });
+
+        const pfdBase64 = fs.readFileSync(pfdPath, { encoding: 'base64' });
+        const tableBase64 = fs.readFileSync(tablePath, { encoding: 'base64' });
+
+        // 5. Extract Metadata
+        const rowValues = await highlightedRow.evaluate((row: any) => {
+            const cells = Array.from(row.querySelectorAll('td'));
+            return (cells as HTMLElement[]).map(td => td.textContent?.trim() || '');
+        });
+        const headers = await page.locator('#tabularData th').evaluateAll((ths: any) => {
+            return (ths as HTMLElement[]).map(th => th.getAttribute('oldtitle') || th.textContent?.trim() || '');
+        });
+        const metadata = Object.fromEntries(headers.map((h: string, i: number) => [h, rowValues[i]]).filter(([h]: [string, string]) => h));
+
+        const utcDate = new Date(event['Event Datetime']);
+        const { localDateString, lightingCondition } = getEnrichedTime(utcDate);
+
+        results.push({
+            event,
+            localDateString,
+            lightingCondition,
+            metadata,
+            pfdBase64,
+            tableBase64
+        });
     }
 
-    // Capture Screenshots
-    const pfdPath = path.join(eventDir, 'pfd.png');
-    await page.locator('#instruments').screenshot({ path: pfdPath });
+    // 6. Generate Notification Content
+    if (results.length === 0) return;
 
-    const tablePath = path.join(eventDir, 'table.png');
-    await page.locator('#tabularData').screenshot({ path: tablePath });
-
-    // Read images as Base64 for embedding
-    const pfdBase64 = fs.readFileSync(pfdPath, { encoding: 'base64' });
-    const tableBase64 = fs.readFileSync(tablePath, { encoding: 'base64' });
-
-    // Extract Parameters for metadata
-    const rowValues = await highlightedRow.evaluate((row: any) => {
-        const cells = Array.from(row.querySelectorAll('td'));
-        return (cells as HTMLElement[]).map(td => td.textContent?.trim() || '');
-    });
-    const headers = await page.locator('#tabularData th').evaluateAll((ths: any) => {
-        return (ths as HTMLElement[]).map(th => th.getAttribute('oldtitle') || th.textContent?.trim() || '');
-    });
-    const metadata = Object.fromEntries(headers.map((h: string, i: number) => [h, rowValues[i]]).filter(([h]: [string, string]) => h));
-
-    // Generate Notification Content
     const flightUrl = `${CONFIG.polarisBaseUrl}/flight/${ref}/`;
-    const emailHtml = generateEmailHtml(event, localDateString, lightingCondition, metadata, pfdBase64, tableBase64, flightUrl);
-    const whatsappMsg = generateWhatsappMsg(event, localDateString, lightingCondition, metadata, flightUrl);
+    const emailHtml = generateEmailHtml(results, flightUrl);
+    const whatsappMsg = generateWhatsappMsg(results, flightUrl);
 
     fs.writeFileSync(path.join(eventDir, 'email_draft.html'), emailHtml);
     fs.writeFileSync(path.join(eventDir, 'whatsapp_draft.txt'), whatsappMsg);
-    fs.writeFileSync(path.join(eventDir, 'metadata.json'), JSON.stringify({ ...event, localDateString, lightingCondition, metadata, flightUrl }, null, 2));
+    // Backward compatibility for outlook_draft_generator (save primary pfd/table)
+    fs.copyFileSync(path.join(eventDir, 'pfd_1.png'), path.join(eventDir, 'pfd.png'));
+    fs.copyFileSync(path.join(eventDir, 'table_1.png'), path.join(eventDir, 'table.png'));
 
-    console.log(`✓ Generated drafts for ${ref} in ${eventDir}`);
+    fs.writeFileSync(path.join(eventDir, 'metadata.json'), JSON.stringify({
+        flightRef: ref,
+        flightUrl,
+        events: results.map(r => ({ ...r.event, localDateString: r.localDateString, lightingCondition: r.lightingCondition, metadata: r.metadata }))
+    }, null, 2));
+
+    console.log(`✓ Generated combined drafts for flight ${ref} (${results.length} events)`);
 }
 
 function parseCsv(content: string): CsvRecord[] {
@@ -182,46 +222,64 @@ function getEnrichedTime(utcDate: Date) {
     return { localDateString, lightingCondition };
 }
 
-function generateEmailHtml(event: CsvRecord, localDate: string, lighting: string, metadata: any, pfdBase64: string, tableBase64: string, url: string) {
-    const radAlt = metadata['Altitude Radio'] || '-';
-    const airSpd = metadata['Airspeed'] || '-';
-    const vertSpd = metadata['Vertical Speed'] || '-';
+function generateEmailHtml(results: any[], url: string) {
+    const first = results[0];
+    const lighting = first.lightingCondition.toUpperCase();
+    const eventList = results.map(r => `${r.event.Code} - ${r.event['Event Short Desc']}`).join(' and ');
 
-    // Torque specific logic (if applicable)
-    let torqueLine = '';
-    if (event.Code.startsWith('ETB')) {
-        const tq1 = metadata['Eng (1) Torque'] || '-';
-        const tq2 = metadata['Eng (2) Torque'] || '-';
-        torqueLine = `<p>The lowest recorded engine torque was Eng(1) at ${tq1}%, Eng (2) at ${tq2}% , below 17% for ~ 3 seconds.</p>`;
-    }
-
-    return `
+    let htmlContent = `
     <html>
     <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px;">
         <p>Hi WESTPAC FDM Team,</p>
-        <p><strong>${lighting.toUpperCase()} EVENT</strong></p>
-        <p>BSS has identified Level 3 event - ${event.Code} - ${event['Event Short Desc']}</p>
-        <p>The aircraft is descending: ${radAlt} ft RAD Alt, ${airSpd} kts, ${vertSpd} fpm.</p>
-        ${torqueLine}
-        <p>The threshold for Level 3 ${event['Event Short Desc']} < ${event.Threshold}</p>
-        <p>The link to the event is below:<br>
+        <p><strong>${lighting} EVENT</strong></p>
+        <p>Brazos Safety has identified ${results.length > 1 ? results.length : ''} Level 3 event${results.length > 1 ? 's' : ''} – ${eventList}</p>
+    `;
+
+    results.forEach((res, index) => {
+        const event = res.event;
+        const metadata = res.metadata;
+        const radAlt = metadata['Altitude Radio'] || '-';
+        const airSpd = metadata['Airspeed'] || '-';
+        const vertSpd = metadata['Vertical Speed'] || '-';
+
+        let torqueLine = '';
+        if (event.Code.startsWith('ETB')) {
+            const tq1 = metadata['Eng (1) Torque'] || '-';
+            const tq2 = metadata['Eng (2) Torque'] || '-';
+            torqueLine = `<p>The lowest recorded engine torque was Eng(1) at ${tq1}%, Eng (2) at ${tq2}% , below 17% for ~ 3 seconds.</p>`;
+        }
+
+        htmlContent += `
+        <div style="margin-top: 20px; border-top: 1px solid #eee; padding-top: 10px;">
+            <p><strong>${event['Event Short Desc']}</strong></p>
+            <p>The aircraft is descending: ${radAlt} ft RAD Alt, ${airSpd} kts, ${vertSpd} fpm.</p>
+            ${torqueLine}
+            <p>The threshold for Level 3 ${event['Event Short Desc']} < ${event.Threshold}</p>
+            
+            <h3>Visual Evidence (PFD)</h3>
+            <img src="data:image/png;base64,${res.pfdBase64}" style="width: 100%; max-width: 600px; border: 1px solid #ccc; display: block;" alt="PFD Screenshot">
+            
+            <h3>Parameter Table</h3>
+            <img src="data:image/png;base64,${res.tableBase64}" style="width: 100%; max-width: 600px; border: 1px solid #ccc; display: block; margin-top: 10px;" alt="Table Screenshot">
+        </div>
+        `;
+    });
+
+    htmlContent += `
+        <p style="margin-top: 20px;">The link to the event is below:<br>
         <a href="${url}">${url}</a></p>
-        
-        <h3>Visual Evidence (PFD)</h3>
-        <img src="data:image/png;base64,${pfdBase64}" style="width: 100%; max-width: 600px; border: 1px solid #ccc; display: block;" alt="PFD Screenshot">
-        
-        <h3>Parameter Table</h3>
-        <img src="data:image/png;base64,${tableBase64}" style="width: 100%; max-width: 600px; border: 1px solid #ccc; display: block; margin-top: 10px;" alt="Table Screenshot">
-        
         <p style="font-size: 0.9em; color: #666; margin-top: 20px;">This is an automated draft for review.</p>
     </body>
     </html>
     `;
+    return htmlContent;
 }
 
-function generateWhatsappMsg(event: CsvRecord, localDate: string, lighting: string, metadata: any, url: string) {
-    // Format date as "Jan 22, 2026"
-    const dateObj = new Date(event['Event Datetime']);
+function generateWhatsappMsg(results: any[], url: string) {
+    const first = results[0];
+    const eventList = results.map(r => `${r.event.Code} - ${r.event['Event Short Desc']}`).join(' & ');
+
+    const dateObj = new Date(first.event['Event Datetime']);
     const formattedDate = new Intl.DateTimeFormat('en-US', {
         month: 'short',
         day: '2-digit',
@@ -230,7 +288,7 @@ function generateWhatsappMsg(event: CsvRecord, localDate: string, lighting: stri
 
     return `Hi WESTPAC FDM Team,
 
-BSS has identified Level 3 event – ${event.Code} - ${event['Event Short Desc']} - ${formattedDate}
+Brazos Safety has identified ${results.length > 1 ? results.length : ''} Level 3 event${results.length > 1 ? 's' : ''} – ${eventList} - ${formattedDate}
 
 The link to the event is below:
 ${url}`;

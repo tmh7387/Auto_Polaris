@@ -1,2 +1,9 @@
 ﻿Reference,Flight Number,Fleet,Aircraft,Takeoff IATA,Landing IATA,Level,Event Short Desc,Graph,Code,Event Datetime,Value,Threshold,Type,Validity,Status,Modified,First Comment,Latest Comment
-68634752,,WH1-AW139,VH-ZXB,,,3,Eng Torque Low Below 300ft AGL,68634752,ETB300,2026-02-01 05:20:47Z,14.9 %,< 17.0 %,Safety,Pending,Open,"2 days, 13 hours ago",,
+68804172,,WH1-AW139,VH-ZXC,,TMW,3,Eng Torque Low Below 300ft AGL,68804172,ETB300,2026-02-06 02:10:29Z,15.6 %,< 17.0 %,Safety,Pending,Open,"13 hours, 21 minutes ago",,
+68804170,,WH1-AW139,VH-XIB,,TMW,3,Eng Torque Low Below 300ft AGL,68804170,ETB300,2026-02-05 23:57:20Z,9.6 %,< 17.0 %,Safety,Pending,Open,"13 hours, 21 minutes ago",,
+68765607,,WH1-AW139,VH-ZXC,,,3,Roll hi >300ft,68765607,FRA005,2026-02-05 02:46:24Z,55.7 deg,≥ ± 54.0 deg,Safety,Pending,Open,"1 day, 13 hours ago",,
+68765616,,WH1-AW139,VH-ZXC,,,3,Eng Torque Low Below 300ft AGL,68765616,ETB300,2026-02-05 01:41:45Z,13.8 %,< 17.0 %,Safety,Pending,Open,"1 day, 13 hours ago",,
+68765615,,WH1-AW139,VH-ZXC,,,3,Eng Torque Low Below 300ft AGL,68765615,ETB300,2026-02-04 23:05:04Z,9.9 %,< 17.0 %,Safety,Pending,Open,"1 day, 13 hours ago",,
+68721082,,WH1-AW139,VH-ZXC,,,3,Fuel qty low warn,68721082,FEX210,2026-02-04 08:24:44Z,220 s,≥ 10 s,Safety,Pending,Open,"2 days, 13 hours ago",,
+68721082,,WH1-AW139,VH-ZXC,,,3,Eng Torque Low Below 300ft AGL,68721082,ETB300,2026-02-04 07:08:47Z,16.2 %,< 17.0 %,Safety,Pending,Open,"2 days, 13 hours ago",,
+68634752,,WH1-AW139,VH-ZXB,,,3,Eng Torque Low Below 300ft AGL,68634752,ETB300,2026-02-01 05:20:47Z,14.9 %,< 17.0 %,Safety,Pending,Open,"5 days, 13 hours ago",,
