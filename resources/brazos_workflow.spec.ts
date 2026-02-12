@@ -1,15 +1,16 @@
 import { test, expect, Page } from '@playwright/test';
+import * as fs from 'fs';
 
 /**
  * Brazos Flight Data Services - Data Extraction Workflow
  * 
  * This script automates the login, navigation, and data filtering process
- * on brazos.flightdataservices.com
+ * on polaris.flightdataservices.com
  */
 
 // Configuration - Move to .env file
 const CONFIG = {
-    baseUrl: 'https://brazos.flightdataservices.com',
+    baseUrl: 'https://polaris.flightdataservices.com',
     credentials: {
         username: process.env.BRAZOS_USERNAME || '',
         password: process.env.BRAZOS_PASSWORD || ''
@@ -30,17 +31,50 @@ async function login(page: Page) {
     console.log('Navigating to login page...');
     await page.goto(CONFIG.baseUrl);
 
-    // Fill in login credentials using identified selectors
-    await page.fill('#id_login', CONFIG.credentials.username);
-    await page.fill('#id_password', CONFIG.credentials.password);
+    // Check if already logged in (redirected to dashboard)
+    if (!page.url().includes('/accounts/login')) {
+        console.log('Already logged in, skipping login form.');
+        return;
+    }
 
-    // Click login button
-    await page.click('button.ui-button:has-text("Login")');
+    // Attempt automated login if credentials exist
+    if (CONFIG.credentials.username && CONFIG.credentials.password) {
+        console.log('Attempting automated login...');
+        await page.fill('#id_login', CONFIG.credentials.username);
+        await page.fill('#id_password', CONFIG.credentials.password);
 
-    // Wait for successful login (redirect away from login page)
-    await page.waitForURL((url) => !url.href.includes('/accounts/login'), { timeout: 10000 });
+        // Use a non-blocking click for the login button to handle cases where 
+        // the site triggers navigation in a way that Playwright's default click-wait stalls
+        await page.click('button.ui-button:has-text("Login")', { noWaitAfter: true });
+        console.log('Login button clicked. Waiting for navigation...');
+    } else {
+        console.log('No credentials provided in .env - Waiting for manual login...');
+    }
 
-    console.log('Login successful');
+    // Monitor for success or failure
+    try {
+        // Wait for redirect away from login - using a longer timeout and commit state
+        await page.waitForURL((url) => !url.href.includes('/accounts/login'), {
+            timeout: 45000,
+            waitUntil: 'commit'
+        });
+        console.log('Login successful');
+    } catch (e) {
+        const lockoutText = await page.textContent('body');
+        if (lockoutText?.toLowerCase().includes('temporarily locked out') || page.url().includes('/accounts/login')) {
+            console.log('\n⚠️ ACTION REQUIRED: Automated login failed or account flagged.');
+            console.log('The browser window is open. Please:');
+            console.log('1. Log in manually in the browser.');
+            console.log('2. Solve any CAPTHCAs if they appear.');
+            console.log('3. Navigation will continue automatically once you reach the dashboard.\n');
+
+            // Wait indefinitely (well, 5 mins) for the user to reach any page that isn't login
+            await page.waitForURL((url) => !url.href.includes('/accounts/login'), { timeout: 300000 });
+            console.log('Login detected (Manual/Semi-automated). Proceeding...');
+        } else {
+            throw e;
+        }
+    }
 }
 
 /**
@@ -50,8 +84,9 @@ async function navigateToEvents(page: Page) {
     console.log('Navigating to Open Events search page...');
 
     // Navigate directly to the Open Events search page
-    await page.goto('https://brazos.flightdataservices.com/event/search/open/');
-    await page.waitForLoadState('networkidle');
+    await page.goto('https://polaris.flightdataservices.com/event/search/open/');
+    // Wait for the main filter input instead of networkidle
+    await page.waitForSelector('#id_fleet', { state: 'visible', timeout: 60000 });
 
     console.log('Navigation complete');
 }
@@ -107,10 +142,11 @@ async function applyFilters(page: Page) {
     console.log('Submitting search...');
     await page.click('button.ui-button:has-text("Search")');
 
-    // Wait for results to load
-    await page.waitForLoadState('networkidle');
+    // Wait for search results table to appear and rows to be populated
+    console.log('Waiting for search results table to populate...');
+    await page.waitForSelector('#event-search-list tr.jqgrow', { state: 'attached', timeout: 60000 });
 
-    console.log('Filters applied successfully');
+    console.log('Filters applied and results loaded successfully');
 }
 
 /**
@@ -136,49 +172,54 @@ async function downloadData(page: Page) {
     const downloadPromise = page.waitForEvent('download');
 
     // Click the export/download button
-    // Strategy: Look for title="Export to CSV" or specific class structure
     try {
         console.log('Attempting to find download button...');
-        // Wait for the toolbar to be visible first
-        await page.waitForSelector('.ui-jqgrid-titlebar, .ui-userdata', { timeout: 5000 }).catch(() => console.log('Toolbar not found immediately'));
+        // Wait for results table container to be ready
+        await page.waitForSelector('.ui-jqgrid-titlebar, .ui-userdata', { timeout: 10000 });
 
-        // Try multiple selectors
+        // Try exact selectors found via exploration
         const exportSelectors = [
-            '[title="Download as CSV"]', // Specific title provided by user
-            '.ui-jqgrid-titlebar [title="Download as CSV"]',
-            '.ui-jqgrid-titlebar .buttons a[title="Download as CSV"]',
-            // Fallbacks
-            'td[title="Export to CSV"]',
+            'a.csv[title="Download as CSV"]',
+            'a.csv',
+            '[title*="Download as CSV"]',
+            '[title*="Export to CSV"]',
+            '.ui-jqgrid-titlebar .csv',
             '.ui-icon-arrowthickstop-1-s'
         ];
 
         let clicked = false;
         for (const selector of exportSelectors) {
-            if (await page.$(selector)) {
+            const btn = page.locator(selector).first();
+            if (await btn.count() > 0) {
                 console.log(`Found download button with selector: ${selector}`);
-                await page.click(selector);
+                await btn.click();
                 clicked = true;
                 break;
             }
         }
 
         if (!clicked) {
-            console.log('Standard selectors failed. Dumping page HTML for debugging...');
-            const html = await page.content();
-            // In a real scenario we might save this to a file, here we just throw
+            console.log('Standard selectors failed. Dumping screenshot for debugging...');
+            await page.screenshot({ path: 'env/tmp/debug-download-failed.png', fullPage: true });
             throw new Error('Download button not found with any known selector');
         }
 
     } catch (e) {
-        console.log('Could not click download button with standard selectors. Attempting fallback...');
-        // Fallback to coordinates or broader search if needed in future
-        throw new Error('Download button not found');
+        const error = e as Error;
+        console.error('Could not click download button:', error.message);
+        throw error;
     }
 
     const download = await downloadPromise;
-    const filePath = 'resources/brazos_pending_events.csv';
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filePath = `input_csvs/brazos_scraped_${timestamp}.csv`;
 
-    // Save to resources
+    // Ensure directory exists
+    if (!fs.existsSync('input_csvs')) {
+        fs.mkdirSync('input_csvs');
+    }
+
+    // Save to input_csvs
     await download.saveAs(filePath);
     console.log(`CSV saved to: ${filePath}`);
 
@@ -208,19 +249,14 @@ test('Brazos data extraction workflow', async ({ page }) => {
         console.log('Workflow completed successfully');
         if (csvPath) console.log('Data saved to:', csvPath);
 
+        // Explicitly close page and context to ensure process exits
+        await page.close();
+        await page.context().close();
+        process.exit(0);
+
     } catch (error) {
         console.error('Workflow failed:', error);
         throw error;
     }
 });
 
-/**
- * Selector identification helper test
- * Run this first to explore the page and identify selectors
- */
-test.skip('Identify selectors', async ({ page }) => {
-    await page.goto(CONFIG.baseUrl);
-
-    // Pause execution to manually explore the page
-    await page.pause();
-});

@@ -10,7 +10,8 @@ test('Debug Brazos login', async ({ page }) => {
 
     try {
         console.log('\n1. Navigating to Brazos...');
-        await page.goto('https://brazos.flightdataservices.com');
+        const baseUrl = 'https://polaris.flightdataservices.com';
+        await page.goto(baseUrl);
         console.log('   ✓ Navigation successful');
 
         console.log('\n2. Waiting for username field...');

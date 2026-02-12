@@ -2,36 +2,37 @@ import { test } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
 import 'dotenv/config';
+import initSqlJs from 'sql.js';
 
 /**
- * CORE NOTIFICATION GENERATOR
- * This script processes pending events from CSV, captures visual evidence from Polaris,
- * and generates notification drafts (Email/WhatsApp) for user review.
+ * CORE NOTIFICATION GENERATOR V2 (Local-First)
+ * This script processes pending events from SQLite, captures visual evidence from Polaris,
+ * and updates the database with evidence paths and new status.
  */
 
-interface CsvRecord {
-    Reference: string;
-    Aircraft: string;
-    Fleet: string;
-    Level: string;
-    'Event Short Desc': string;
-    'Event Datetime': string;
-    Threshold: string;
-    Value: string;
-    Code: string;
-    [key: string]: string;
+interface DBEvent {
+    id: number;
+    flight_id: number;
+    polaris_ref: string;
+    event_name: string;
+    severity_level: string;
+    parameter_value: string;
+    analysis_status: string;
+    tail_number: string;
+    flight_date: string;
+    departure_time: string;
 }
 
 const CONFIG = {
-    inputCsv: 'resources/brazos_pending_events.csv',
-    outputDir: 'env/assets/notifications',
+    dbPath: path.resolve('auto_polaris.db'),
+    outputDir: path.resolve('evidence_screenshots'),
     timezone: 'Australia/Sydney',
     dayStartHour: 6,
     dayEndHour: 18,
     polarisBaseUrl: 'https://polaris.flightdataservices.com'
 };
 
-test('Generate notifications for pending events', async ({ page }) => {
+test('Generate notifications for pending events from DB', async ({ page }) => {
     // 1. Prepare Environment
     if (!fs.existsSync(CONFIG.outputDir)) {
         fs.mkdirSync(CONFIG.outputDir, { recursive: true });
@@ -41,18 +42,37 @@ test('Generate notifications for pending events', async ({ page }) => {
     const password = process.env.BRAZOS_PASSWORD;
     if (!username || !password) throw new Error('Credentials not set in .env');
 
-    // 2. Parse CSV
-    console.log(`Reading events from ${CONFIG.inputCsv}...`);
-    const csvContent = fs.readFileSync(CONFIG.inputCsv, 'utf-8');
-    const events = parseCsv(csvContent);
+    // 2. Load Database and Query 'NEW' Events
+    const SQL = await initSqlJs();
+    if (!fs.existsSync(CONFIG.dbPath)) {
+        throw new Error(`Database not found at ${CONFIG.dbPath}`);
+    }
+    const filebuffer = fs.readFileSync(CONFIG.dbPath);
+    const db = new SQL.Database(filebuffer);
+
+    console.log(`Querying pending events from ${CONFIG.dbPath}...`);
+    const stmt = db.prepare(`
+        SELECT fe.*, f.tail_number, f.flight_date, f.departure_time 
+        FROM flight_events fe
+        JOIN flights f ON fe.flight_id = f.id
+        WHERE fe.analysis_status = 'NEW'
+    `);
+
+    const events: DBEvent[] = [];
+    while (stmt.step()) {
+        events.push(stmt.getAsObject() as unknown as DBEvent);
+    }
+    stmt.free();
+
     console.log(`Found ${events.length} events to process.`);
 
     if (events.length === 0) {
         console.log('No events to process.');
+        db.close();
         return;
     }
 
-    // 3. Login to Polaris (sharing session)
+    // 3. Login to Polaris
     console.log('Logging in to Polaris...');
     await page.goto(`${CONFIG.polarisBaseUrl}/accounts/login/`);
     await page.fill('#id_login', username);
@@ -64,22 +84,31 @@ test('Generate notifications for pending events', async ({ page }) => {
     // 4. Process Each Event
     for (const event of events) {
         try {
-            await processEvent(page, event);
+            await processEvent(page, event, db);
         } catch (error) {
-            console.error(`Failed to process event ${event.Reference}:`, error);
+            console.error(`Failed to process event ID ${event.id}:`, error);
         }
     }
+
+    // 5. Save Database changes
+    const data = db.export();
+    const buffer = Buffer.from(data);
+    fs.writeFileSync(CONFIG.dbPath, buffer);
+    db.close();
+    console.log('Database updated with processing results.');
+    process.exit(0);
 });
 
-async function processEvent(page: any, event: CsvRecord) {
-    const ref = event.Reference;
-    const eventDir = path.join(CONFIG.outputDir, ref);
+async function processEvent(page: any, event: DBEvent, db: any) {
+    const eventId = event.id;
+    const ref = event.polaris_ref;
+    const eventDir = path.join(CONFIG.outputDir, eventId.toString());
     if (!fs.existsSync(eventDir)) fs.mkdirSync(eventDir, { recursive: true });
 
-    console.log(`Processing Event ${ref} (${event.Code})...`);
+    console.log(`Processing Event ID ${eventId} (Ref: ${ref})...`);
 
-    // Determine Day/Night and Local Time
-    const utcDate = new Date(event['Event Datetime']);
+    const eventTimeStr = `${event.flight_date} ${event.departure_time}`;
+    const utcDate = new Date(eventTimeStr);
     const { localDateString, lightingCondition } = getEnrichedTime(utcDate);
 
     // Navigate to Graph URL
@@ -90,32 +119,25 @@ async function processEvent(page: any, event: CsvRecord) {
     await page.waitForSelector('.item.event', { timeout: 20000 });
 
     // Find the specific event in the sidebar
-    // We match by the Event Short Desc from CSV (e.g. "Eng Torque Low Below 300ft AGL")
-    const eventShortDesc = event['Event Short Desc'];
-    console.log(`Locating event in sidebar: "${eventShortDesc}"`);
+    const eventName = event.event_name;
+    console.log(`Locating event in sidebar: "${eventName}"`);
 
-    const eventItem = page.locator(`.item.event:has-text("${eventShortDesc}")`).first();
+    const eventItem = page.locator(`.item.event:has-text("${eventName}")`).first();
     if (await eventItem.count() === 0) {
-        throw new Error(`Event "${eventShortDesc}" not found in sidebar for flight ${ref}`);
+        throw new Error(`Event "${eventName}" not found in sidebar for flight ${ref}`);
     }
 
-    const eventId = await eventItem.getAttribute('data-key');
-    console.log(`Found Event ID: ${eventId}`);
+    const polarisEventId = await eventItem.getAttribute('data-key');
+    console.log(`Found Polaris Event ID: ${polarisEventId}`);
 
     // Navigate to the specific event moment
-    const specificUrl = `${graphUrl}#event=${eventId}`;
+    const specificUrl = `${graphUrl}#event=${polarisEventId}`;
     console.log(`Navigating to specific moment: ${specificUrl}`);
     await page.goto(specificUrl);
     await page.waitForLoadState('networkidle');
 
-    // Wait for the specific row to be selected in the table
-    try {
-        await page.waitForSelector('tr.selected', { timeout: 10000 });
-    } catch (e) {
-        console.warn('Timed out waiting for tr.selected, continuing with first available row.');
-    }
-
-    await page.waitForTimeout(3000); // Settle time for rendering
+    // Settle time for rendering
+    await page.waitForTimeout(3000);
 
     const highlightedRow = page.locator('tr.selected, tr.event-row').first();
     if (await highlightedRow.count() > 0) {
@@ -129,41 +151,14 @@ async function processEvent(page: any, event: CsvRecord) {
     const tablePath = path.join(eventDir, 'table.png');
     await page.locator('#tabularData').screenshot({ path: tablePath });
 
-    // Read images as Base64 for embedding
-    const pfdBase64 = fs.readFileSync(pfdPath, { encoding: 'base64' });
-    const tableBase64 = fs.readFileSync(tablePath, { encoding: 'base64' });
+    console.log(`✓ Evidence captured for ${eventId} in ${eventDir}`);
 
-    // Extract Parameters for metadata
-    const rowValues = await highlightedRow.evaluate((row: any) => {
-        const cells = Array.from(row.querySelectorAll('td'));
-        return (cells as HTMLElement[]).map(td => td.textContent?.trim() || '');
-    });
-    const headers = await page.locator('#tabularData th').evaluateAll((ths: any) => {
-        return (ths as HTMLElement[]).map(th => th.getAttribute('oldtitle') || th.textContent?.trim() || '');
-    });
-    const metadata = Object.fromEntries(headers.map((h: string, i: number) => [h, rowValues[i]]).filter(([h]: [string, string]) => h));
-
-    // Generate Notification Content
-    const flightUrl = `${CONFIG.polarisBaseUrl}/flight/${ref}/`;
-    const emailHtml = generateEmailHtml(event, localDateString, lightingCondition, metadata, pfdBase64, tableBase64, flightUrl);
-    const whatsappMsg = generateWhatsappMsg(event, localDateString, lightingCondition, metadata, flightUrl);
-
-    fs.writeFileSync(path.join(eventDir, 'email_draft.html'), emailHtml);
-    fs.writeFileSync(path.join(eventDir, 'whatsapp_draft.txt'), whatsappMsg);
-    fs.writeFileSync(path.join(eventDir, 'metadata.json'), JSON.stringify({ ...event, localDateString, lightingCondition, metadata, flightUrl }, null, 2));
-
-    console.log(`✓ Generated drafts for ${ref} in ${eventDir}`);
-}
-
-function parseCsv(content: string): CsvRecord[] {
-    const lines = content.trim().split('\n');
-    const headers = lines[0].split(',').map(h => h.trim());
-    return lines.slice(1).map(line => {
-        const values = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
-        const record: any = {};
-        headers.forEach((h, i) => record[h] = values[i] || '');
-        return record as CsvRecord;
-    }).filter(r => r.Reference);
+    // Update DB status
+    db.run(`
+        UPDATE flight_events 
+        SET analysis_status = 'EVIDENCE_READY', evidence_path = ? 
+        WHERE id = ?
+    `, [eventDir, eventId]);
 }
 
 function getEnrichedTime(utcDate: Date) {
@@ -180,58 +175,4 @@ function getEnrichedTime(utcDate: Date) {
     const lightingCondition: 'Day' | 'Night' = (hour >= CONFIG.dayStartHour && hour < CONFIG.dayEndHour) ? 'Day' : 'Night';
 
     return { localDateString, lightingCondition };
-}
-
-function generateEmailHtml(event: CsvRecord, localDate: string, lighting: string, metadata: any, pfdBase64: string, tableBase64: string, url: string) {
-    const radAlt = metadata['Altitude Radio'] || '-';
-    const airSpd = metadata['Airspeed'] || '-';
-    const vertSpd = metadata['Vertical Speed'] || '-';
-
-    // Torque specific logic (if applicable)
-    let torqueLine = '';
-    if (event.Code.startsWith('ETB')) {
-        const tq1 = metadata['Eng (1) Torque'] || '-';
-        const tq2 = metadata['Eng (2) Torque'] || '-';
-        torqueLine = `<p>The lowest recorded engine torque was Eng(1) at ${tq1}%, Eng (2) at ${tq2}% , below 17% for ~ 3 seconds.</p>`;
-    }
-
-    return `
-    <html>
-    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px;">
-        <p>Hi WESTPAC FDM Team,</p>
-        <p><strong>${lighting.toUpperCase()} EVENT</strong></p>
-        <p>BSS has identified Level 3 event - ${event.Code} - ${event['Event Short Desc']}</p>
-        <p>The aircraft is descending: ${radAlt} ft RAD Alt, ${airSpd} kts, ${vertSpd} fpm.</p>
-        ${torqueLine}
-        <p>The threshold for Level 3 ${event['Event Short Desc']} < ${event.Threshold}</p>
-        <p>The link to the event is below:<br>
-        <a href="${url}">${url}</a></p>
-        
-        <h3>Visual Evidence (PFD)</h3>
-        <img src="data:image/png;base64,${pfdBase64}" style="width: 100%; max-width: 600px; border: 1px solid #ccc; display: block;" alt="PFD Screenshot">
-        
-        <h3>Parameter Table</h3>
-        <img src="data:image/png;base64,${tableBase64}" style="width: 100%; max-width: 600px; border: 1px solid #ccc; display: block; margin-top: 10px;" alt="Table Screenshot">
-        
-        <p style="font-size: 0.9em; color: #666; margin-top: 20px;">This is an automated draft for review.</p>
-    </body>
-    </html>
-    `;
-}
-
-function generateWhatsappMsg(event: CsvRecord, localDate: string, lighting: string, metadata: any, url: string) {
-    // Format date as "Jan 22, 2026"
-    const dateObj = new Date(event['Event Datetime']);
-    const formattedDate = new Intl.DateTimeFormat('en-US', {
-        month: 'short',
-        day: '2-digit',
-        year: 'numeric'
-    }).format(dateObj);
-
-    return `Hi WESTPAC FDM Team,
-
-BSS has identified Level 3 event – ${event.Code} - ${event['Event Short Desc']} - ${formattedDate}
-
-The link to the event is below:
-${url}`;
 }

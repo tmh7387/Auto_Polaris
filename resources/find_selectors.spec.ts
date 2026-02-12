@@ -22,7 +22,7 @@ test('Find Brazos filter selectors', async ({ page }) => {
 
     // Login
     log('1. Logging in...');
-    await page.goto('https://brazos.flightdataservices.com');
+    await page.goto('https://polaris.flightdataservices.com');
     await page.fill('#id_login', username);
     await page.fill('#id_password', password);
     await page.click('button.ui-button:has-text("Login")');

@@ -15,8 +15,8 @@ test('Verify Brazos login functionality', async ({ page }) => {
 
     console.log('Starting login test...');
 
-    // Navigate to Brazos
-    await page.goto('https://brazos.flightdataservices.com');
+    // Navigate to Polaris
+    await page.goto('https://polaris.flightdataservices.com');
 
     // Wait for login page to load
     await page.waitForSelector('#id_login', { timeout: 10000 });

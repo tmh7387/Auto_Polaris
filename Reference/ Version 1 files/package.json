@@ -1,0 +1,28 @@
+{
+  "name": "auto-polaris",
+  "version": "1.0.0",
+  "description": "Automated data extraction from Brazos Flight Data Services",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:debug": "playwright test --debug",
+    "test:selectors": "playwright test --grep @selectors --headed"
+  },
+  "keywords": [
+    "automation",
+    "playwright",
+    "data-extraction"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/test": "^1.40.0",
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "twilio": "^5.12.0"
+  }
+}
