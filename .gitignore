@@ -13,3 +13,13 @@ node_modules/
 test-results/
 playwright-report/
 playwright/.cache/
+
+# Local database
+auto_polaris.db
+
+# Asset Folders (Local only)
+input_csvs/
+evidence_screenshots/
+archive/
+logs/
+env/assets/notifications/

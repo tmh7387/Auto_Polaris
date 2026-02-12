@@ -1,31 +1,75 @@
-import { test, expect } from '@playwright/test';
+import { test } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
 import 'dotenv/config';
+import initSqlJs from 'sql.js';
 
 /**
- * OUTLOOK DRAFT GENERATOR - UI REFINED
- * This version uses precise UI interactions for the contact picker and subject line.
+ * OUTLOOK DRAFT GENERATOR V2 (Refactored to match V1 Logic)
+ * Incorporates robust V1 selectors (Contact Picker), state management (Discard Drafts),
+ * and dynamic attachments while maintaining V2 DB integration.
  */
 
+interface DBEvent {
+    id: number;
+    flight_id: number;
+    polaris_ref: string;
+    event_name: string;
+    severity_level: string;
+    parameter_value: string;
+    analysis_status: string;
+    evidence_path: string;
+    tail_number: string;
+    flight_date: string;
+    departure_time: string;
+}
+
 const CONFIG = {
-    notificationsDir: 'env/assets/notifications',
+    dbPath: path.resolve('auto_polaris.db'),
     outlookUrl: 'https://outlook.office365.com/mail/',
-    recipientTo: 'WestPac_FDM_Event_Notification'
+    recipientTo: 'WestPac_FDM_Event_Notification',
+    polarisBaseUrl: 'https://polaris.flightdataservices.com'
 };
 
-test('Create Outlook drafts for processed events', async ({ page }) => {
-    const username = 'ahouston@brazossafety.com';
-    const password = process.env.BRAZOS_PASSWORD;
+test('Create Outlook drafts from DB events', async ({ page }) => {
+    const username = process.env.OUTLOOK_EMAIL;
+    const password = process.env.OUTLOOK_PASSWORD;
 
-    if (!username || !password) throw new Error('Outlook credentials not found in .env');
+    if (!username || !password) {
+        throw new Error('Outlook credentials (OUTLOOK_EMAIL, OUTLOOK_PASSWORD) not found in .env');
+    }
 
-    const eventDirs = fs.readdirSync(CONFIG.notificationsDir)
-        .filter(f => fs.statSync(path.join(CONFIG.notificationsDir, f)).isDirectory());
+    // 1. Load Database and Query 'EVIDENCE_READY' Events
+    const SQL = await initSqlJs();
+    if (!fs.existsSync(CONFIG.dbPath)) {
+        throw new Error(`Database not found at ${CONFIG.dbPath}`);
+    }
+    const filebuffer = fs.readFileSync(CONFIG.dbPath);
+    const db = new SQL.Database(filebuffer);
 
-    console.log(`Found ${eventDirs.length} events to draft.`);
+    console.log(`Querying EVIDENCE_READY events from ${CONFIG.dbPath}...`);
+    const stmt = db.prepare(`
+        SELECT fe.*, f.tail_number, f.flight_date, f.departure_time 
+        FROM flight_events fe
+        JOIN flights f ON fe.flight_id = f.id
+        WHERE fe.analysis_status = 'EVIDENCE_READY'
+    `);
 
-    // Login
+    const events: DBEvent[] = [];
+    while (stmt.step()) {
+        events.push(stmt.getAsObject() as unknown as DBEvent);
+    }
+    stmt.free();
+
+    console.log(`Found ${events.length} events to draft.`);
+
+    if (events.length === 0) {
+        console.log('No events to process.');
+        db.close();
+        return;
+    }
+
+    // 2. Login to Outlook (V1 Style)
     console.log(`Logging in to Outlook as ${username}...`);
     await page.goto(CONFIG.outlookUrl);
     await page.fill('input[type="email"]', username);
@@ -39,41 +83,54 @@ test('Create Outlook drafts for processed events', async ({ page }) => {
         await stayBtn.click();
     } catch (e) { }
 
+    // Wait generously for inbox (V1 uses 60s timeout)
     await page.getByRole('button', { name: /New mail/i }).waitFor({ timeout: 60000 });
     console.log('Inbox loaded.');
 
-    for (const ref of eventDirs) {
+    // 3. Process Each Event
+    for (const event of events) {
         try {
-            await createDraft(page, ref);
-            await page.waitForTimeout(5000);
-            console.log(`✓ Draft finished for ${ref}`);
-            // Use goto instead of reload for a cleaner state reset
+            await createDraft(page, event);
+            console.log(`✓ Draft finished for Event ID ${event.id}`);
+
+            // Update DB status and Log
+            db.run("UPDATE flight_events SET analysis_status = 'DRAFTED' WHERE id = ?", [event.id]);
+            db.run(`
+                INSERT INTO notification_log (event_id, channel, status) 
+                VALUES (?, 'EMAIL', 'DRAFTED')
+            `, [event.id]);
+
+            // V1 Logic: Refresh page to clear state for next iteration
             await page.goto(CONFIG.outlookUrl);
-            await page.waitForTimeout(15000);
+            await page.waitForTimeout(10000);
+
         } catch (error) {
-            console.error(`Failed to create draft for ${ref}:`, error);
-            await page.screenshot({ path: `env/logs/error_${ref}_ui.png` });
+            console.error(`Failed to create draft for Event ID ${event.id}:`, error);
+            // Capture error screenshot
+            await page.screenshot({ path: `env/logs/error_draft_${event.id}.png` });
             await page.goto(CONFIG.outlookUrl);
-            await page.waitForTimeout(15000);
+            await page.waitForTimeout(10000);
         }
     }
+
+    // 4. Save Database changes
+    const data = db.export();
+    const buffer = Buffer.from(data);
+    fs.writeFileSync(CONFIG.dbPath, buffer);
+    db.close();
+    console.log('Database updated with DRAFTED status.');
+    process.exit(0);
 });
 
-async function createDraft(page: any, ref: string) {
-    const eventDir = path.join(CONFIG.notificationsDir, ref);
-    const metadataPath = path.join(eventDir, 'metadata.json');
-    if (!fs.existsSync(metadataPath)) return;
 
-    const metadataJson = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'));
+async function createDraft(page: any, event: DBEvent) {
+    const eventDir = event.evidence_path;
+    const ref = event.polaris_ref;
+    const subject = `WESTPAC FDM LEVEL 3 - ${event.event_name}`;
 
-    // Handle both old and new metadata structure
-    const eventList = metadataJson.events ? metadataJson.events : [metadataJson];
-    const uniqueDescs = [...new Set(eventList.map((e: any) => e['Event Short Desc']))];
-    const subject = `WESTPAC FDM LEVEL 3 - ${uniqueDescs.join(' and ')}`;
+    console.log(`Creating draft for Event ID ${event.id} (Ref: ${ref})`);
 
-    console.log(`Creating draft: ${ref}`);
-
-    // Ensure we are in a clean state by clicking Discard if an old compose window is open
+    // V1 Logic: Ensure clean state by discarding old drafts
     try {
         const discardBtn = page.getByRole('button', { name: /Discard/i }).first();
         if (await discardBtn.isVisible()) {
@@ -87,15 +144,14 @@ async function createDraft(page: any, ref: string) {
 
     // New Mail
     await page.getByRole('button', { name: /New mail/i }).first().click();
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(5000); // V1 used 5s wait
 
-    // 1. Open Contact Picker
+    // 1. Fill Recipient (V1 Contact Picker Logic)
     console.log('Opening Contact Picker...');
-    await page.getByRole('button', { name: 'To', exact: true }).first().click();
-    await page.waitForTimeout(4000);
-
-    // 2. Navigate to Contacts and Select
     try {
+        await page.getByRole('button', { name: 'To', exact: true }).first().click();
+        await page.waitForTimeout(4000);
+
         console.log('Selecting Contacts tab...');
         await page.getByText('Contacts', { exact: true }).first().click();
         await page.waitForTimeout(2000);
@@ -108,11 +164,11 @@ async function createDraft(page: any, ref: string) {
         await page.getByRole('button', { name: 'Save' }).first().click();
         await page.waitForTimeout(2000);
     } catch (e) {
-        console.log('Picker interaction failed, closing modal...');
+        console.log('Picker interaction failed, falling back to manual entry...');
         await page.keyboard.press('Escape');
         await page.waitForTimeout(1000);
-        // Fallback: Type manually
-        console.log('Trying manual entry fallback...');
+
+        // V1 Fallback Logic
         const toBox = page.locator('div[role="textbox"][aria-label="To"]');
         if (await toBox.count() > 0) {
             await toBox.fill(CONFIG.recipientTo);
@@ -122,20 +178,60 @@ async function createDraft(page: any, ref: string) {
         }
         await page.keyboard.press('Tab');
     }
-    await page.screenshot({ path: `env/logs/draft_${ref}_to_done.png` });
+    await page.waitForTimeout(1000);
 
-    // 3. Fill Subject
+    // 2. Fill Subject (V1 Typing Logic)
     console.log('Filling Subject...');
     const subjectBox = page.getByPlaceholder(/Add a subject/i);
     await subjectBox.click({ force: true });
     await page.waitForTimeout(500);
-    await page.keyboard.type(subject, { delay: 50 });
+    await page.keyboard.type(subject, { delay: 50 }); // V1 typed with delay for reliability
     await page.keyboard.press('Tab');
     await page.waitForTimeout(1000);
 
-    // 4. Fill Body
-    console.log('Injecting HTML Body...');
-    const htmlDraft = fs.readFileSync(path.join(eventDir, 'email_draft.html'), 'utf-8');
+    // 3. Fill Body
+    console.log('Injecting HTML Body with Inline Images...');
+    const flightUrl = `${CONFIG.polarisBaseUrl}/flight/${ref}/`;
+
+    // Prepare Inline Images (Base64)
+    let pfdHtml = '';
+    let tableHtml = '';
+
+    // Check for standard V2 names "pfd.png" / "table.png"
+    const pfdPath = path.join(eventDir, 'pfd.png');
+    const tablePath = path.join(eventDir, 'table.png');
+
+    if (fs.existsSync(pfdPath)) {
+        const pfdBase64 = fs.readFileSync(pfdPath, { encoding: 'base64' });
+        pfdHtml = `
+            <h3>Visual Evidence (PFD)</h3>
+            <img src="data:image/png;base64,${pfdBase64}" style="width: 100%; max-width: 600px; border: 1px solid #ccc; display: block;" alt="PFD Screenshot">
+        `;
+    }
+
+    if (fs.existsSync(tablePath)) {
+        const tableBase64 = fs.readFileSync(tablePath, { encoding: 'base64' });
+        tableHtml = `
+            <h3>Parameter Table</h3>
+            <img src="data:image/png;base64,${tableBase64}" style="width: 100%; max-width: 600px; border: 1px solid #ccc; display: block; margin-top: 10px;" alt="Table Screenshot">
+        `;
+    }
+
+    const emailHtml = `
+        <p>Hi WESTPAC FDM Team,</p>
+        <p>BSS has identified Level 3 event - ${event.event_name}</p>
+        <p>Aircraft: ${event.tail_number} | Date: ${event.flight_date}</p>
+        <p>The link to the event is below:<br>
+        <a href="${flightUrl}">${flightUrl}</a></p>
+        
+        <div style="margin-top: 20px; border-top: 1px solid #eee; padding-top: 10px;">
+            ${pfdHtml}
+            ${tableHtml}
+        </div>
+
+        <p style="margin-top: 20px;">Detailed evidence files are also attached below.</p>
+    `;
+
     await page.evaluate(({ content }: { content: string }) => {
         const editor = document.querySelector('div[role="textbox"][aria-label="Message body"]') as HTMLElement | null ||
             document.querySelector('div[aria-label="Message body"]') as HTMLElement | null ||
@@ -144,29 +240,32 @@ async function createDraft(page: any, ref: string) {
             editor.innerHTML = content;
             editor.dispatchEvent(new Event('input', { bubbles: true }));
         }
-    }, { content: htmlDraft });
+    }, { content: emailHtml });
     await page.waitForTimeout(2000);
 
-    // 5. Attachments - Capture all visual evidence files
-    const allFiles = fs.readdirSync(eventDir);
-    const evidenceFiles = allFiles.filter(f => f.startsWith('pfd_') || f.startsWith('table_'));
+    // 4. Attachments (V1 Dynamic Logic)
+    if (fs.existsSync(eventDir)) {
+        const allFiles = fs.readdirSync(eventDir);
+        // V1 looked for pfd_ and table_, we adapt to support both V1 style and simple names
+        const evidenceFiles = allFiles.filter(f =>
+            f.startsWith('pfd') || f.startsWith('table') || f.endsWith('.png')
+        );
 
-    for (const file of evidenceFiles) {
-        const filePath = path.resolve(path.join(eventDir, file));
-        console.log(`Attaching ${file}...`);
-        try {
-            const [fileChooser] = await Promise.all([
-                page.waitForEvent('filechooser'),
-                page.getByRole('button', { name: /Attach/i }).first().click().then(() =>
-                    page.getByRole('menuitem', { name: /Browse this computer/i }).or(page.locator('button:has-text("Browse this computer")')).first().click()
-                )
-            ]);
-            await fileChooser.setFiles(filePath);
-            await page.waitForTimeout(3000); // Wait for upload
-        } catch (e) {
-            console.log(`Failed to attach ${file}, skipping.`);
+        for (const file of evidenceFiles) {
+            const filePath = path.resolve(path.join(eventDir, file));
+            console.log(`Attaching ${file}...`);
+            try {
+                const [fileChooser] = await Promise.all([
+                    page.waitForEvent('filechooser'),
+                    page.getByRole('button', { name: /Attach/i }).first().click().then(() =>
+                        page.getByRole('menuitem', { name: /Browse this computer/i }).or(page.locator('button:has-text("Browse this computer")')).first().click()
+                    )
+                ]);
+                await fileChooser.setFiles(filePath);
+                await page.waitForTimeout(5000); // V1 wait for upload
+            } catch (e) {
+                console.log(`Failed to attach ${file}, skipping.`);
+            }
         }
     }
-
-    await page.screenshot({ path: `env/logs/draft_${ref}_final_all.png` });
 }

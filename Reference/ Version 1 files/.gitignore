@@ -1,0 +1,15 @@
+env/.env
+env/credentials.json
+env/token.json
+env/tmp/
+env/logs/
+__pycache__/
+*.pyc
+
+# Node.js
+node_modules/
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/

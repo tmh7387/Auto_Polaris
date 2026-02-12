@@ -16,7 +16,7 @@ test('Explore Brazos selectors', async ({ page }) => {
 
     // Login
     console.log('1. Logging in...');
-    await page.goto('https://brazos.flightdataservices.com');
+    await page.goto('https://polaris.flightdataservices.com');
     await page.waitForSelector('#id_login');
     await page.fill('#id_login', username);
     await page.fill('#id_password', password);

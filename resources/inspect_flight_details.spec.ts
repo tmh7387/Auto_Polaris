@@ -1,7 +1,7 @@
 import { test, expect, Page } from '@playwright/test';
 
 const CONFIG = {
-    baseUrl: 'https://brazos.flightdataservices.com',
+    baseUrl: 'https://polaris.flightdataservices.com',
     targetUrl: 'https://polaris.flightdataservices.com/flight/68199568/',
     credentials: {
         username: process.env.BRAZOS_USERNAME || '',

@@ -6,7 +6,7 @@ dotenv.config({ path: './env/.env' });
 
 export default defineConfig({
     testDir: './resources',
-    timeout: 120000,
+    timeout: 600000,
     fullyParallel: false,
     forbidOnly: !!process.env.CI,
     retries: process.env.CI ? 2 : 0,
@@ -14,14 +14,14 @@ export default defineConfig({
     reporter: 'html',
 
     use: {
-        baseURL: 'https://brazos.flightdataservices.com',
+        baseURL: 'https://polaris.flightdataservices.com',
         trace: 'on-first-retry',
         screenshot: 'only-on-failure',
         video: 'retain-on-failure',
 
-        // Slower actions for better reliability
-        actionTimeout: 30000,
-        navigationTimeout: 60000,
+        // Even slower actions for better reliability given rate limiting
+        actionTimeout: 60000,
+        navigationTimeout: 90000,
     },
 
     projects: [
@@ -29,10 +29,6 @@ export default defineConfig({
             name: 'chromium',
             use: {
                 ...devices['Desktop Chrome'],
-                channel: 'chrome', // Use system Chrome
-                launchOptions: {
-                    executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' // Explicit path for reliability
-                }
             },
         },
     ],
