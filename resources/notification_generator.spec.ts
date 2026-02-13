@@ -153,6 +153,33 @@ async function processEvent(page: any, event: DBEvent, db: any) {
 
     console.log(`✓ Evidence captured for ${eventId} in ${eventDir}`);
 
+    // Scrape Metadata from Tabular Data (V1 Logic)
+    let metadata: any = {};
+    try {
+        const rowValues = await highlightedRow.evaluate((row: any) => {
+            const cells = Array.from(row.querySelectorAll('td'));
+            return (cells as HTMLElement[]).map(td => td.textContent?.trim() || '');
+        });
+        const headers = await page.locator('#tabularData th').evaluateAll((ths: any) => {
+            return (ths as HTMLElement[]).map(th => th.getAttribute('oldtitle') || th.textContent?.trim() || '');
+        });
+        metadata = Object.fromEntries(headers.map((h: string, i: number) => [h, rowValues[i]]).filter(([h]: [string, string]) => h));
+
+        fs.writeFileSync(path.join(eventDir, 'metadata.json'), JSON.stringify(metadata, null, 2));
+        console.log(`✓ Metadata saved for ${eventId}`);
+    } catch (e) {
+        console.warn(`⚠️ Failed to scrape metadata for ${eventId}:`, e);
+    }
+
+    // Generate email_draft.html (V1 Logic)
+    const pfdBase64 = fs.readFileSync(pfdPath, { encoding: 'base64' });
+    const tableBase64 = fs.readFileSync(tablePath, { encoding: 'base64' });
+    const flightUrl = `${CONFIG.polarisBaseUrl}/flight/${ref}/`;
+
+    const emailHtml = generateEmailHtml(event, metadata, pfdBase64, tableBase64, flightUrl, lightingCondition);
+    fs.writeFileSync(path.join(eventDir, 'email_draft.html'), emailHtml);
+    console.log(`✓ email_draft.html generated for ${eventId}`);
+
     // Update DB status
     db.run(`
         UPDATE flight_events 
@@ -175,4 +202,50 @@ function getEnrichedTime(utcDate: Date) {
     const lightingCondition: 'Day' | 'Night' = (hour >= CONFIG.dayStartHour && hour < CONFIG.dayEndHour) ? 'Day' : 'Night';
 
     return { localDateString, lightingCondition };
+}
+
+/**
+ * Generate rich HTML email content (ported from V1 notification_generator.spec.ts)
+ */
+function generateEmailHtml(event: DBEvent, metadata: any, pfdBase64: string, tableBase64: string, url: string, lightingCondition: string) {
+    const lighting = lightingCondition.toUpperCase();
+    const eventCode = (event as any).event_code || event.event_name;
+    const threshold = (event as any).threshold_value || (event as any).parameter_value || '-';
+    const radAlt = metadata['Altitude Radio'] || '-';
+    const airSpd = metadata['Airspeed'] || '-';
+    const vertSpd = metadata['Vertical Speed'] || '-';
+
+    let torqueLine = '';
+    if (eventCode.startsWith('ETB') || event.event_name.includes('Torque')) {
+        const tq1 = metadata['Eng (1) Torque'] || '-';
+        const tq2 = metadata['Eng (2) Torque'] || '-';
+        torqueLine = `<p>The lowest recorded engine torque was Eng(1) at ${tq1}%, Eng (2) at ${tq2}% , below 17% for ~ 3 seconds.</p>`;
+    }
+
+    return `
+    <html>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px;">
+        <p>Hi WESTPAC FDM Team,</p>
+        <p><strong>${lighting} EVENT</strong></p>
+        <p>Brazos Safety has identified Level 3 event – ${eventCode} - ${event.event_name}</p>
+
+        <div style="margin-top: 20px; border-top: 1px solid #eee; padding-top: 10px;">
+            <p><strong>${event.event_name}</strong></p>
+            <p>The aircraft is descending: ${radAlt} ft RAD Alt, ${airSpd} kts, ${vertSpd} fpm.</p>
+            ${torqueLine}
+            <p>The threshold for Level 3 ${event.event_name} < ${threshold}</p>
+            
+            <h3>Visual Evidence (PFD)</h3>
+            <img src="data:image/png;base64,${pfdBase64}" style="width: 100%; max-width: 600px; border: 1px solid #ccc; display: block;" alt="PFD Screenshot">
+            
+            <h3>Parameter Table</h3>
+            <img src="data:image/png;base64,${tableBase64}" style="width: 100%; max-width: 600px; border: 1px solid #ccc; display: block; margin-top: 10px;" alt="Table Screenshot">
+        </div>
+
+        <p style="margin-top: 20px;">The link to the event is below:<br>
+        <a href="${url}">${url}</a></p>
+        <p style="font-size: 0.9em; color: #666; margin-top: 20px;">This is an automated draft for review.</p>
+    </body>
+    </html>
+    `;
 }

@@ -146,10 +146,10 @@ async function processFile(db, filename) {
 
             // Insert Event (Using INSERT OR REPLACE to update polaris_status to PENDING if already exists)
             db.run(`
-                INSERT INTO flight_events (flight_id, polaris_ref, event_name, severity_level, parameter_value, polaris_status, event_code, modified_text)
-                VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?)
-                ON CONFLICT(polaris_ref) DO UPDATE SET polaris_status = 'PENDING', event_code = excluded.event_code, modified_text = excluded.modified_text
-            `, [flightId, ref, row['Event Short Desc'] || 'Unknown', row['Level'] || 'Unknown', row['Value'] || '', row['Code'] || '-', row['Modified'] || '']);
+                INSERT INTO flight_events (flight_id, polaris_ref, event_name, severity_level, parameter_value, polaris_status, event_code, modified_text, threshold_value)
+                VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)
+                ON CONFLICT(polaris_ref) DO UPDATE SET polaris_status = 'PENDING', event_code = excluded.event_code, modified_text = excluded.modified_text, threshold_value = excluded.threshold_value
+            `, [flightId, ref, row['Event Short Desc'] || 'Unknown', row['Level'] || 'Unknown', row['Value'] || '', row['Code'] || '-', row['Modified'] || '', row['Threshold'] || '']);
 
             importedCount++;
         }

@@ -94,7 +94,7 @@ async function navigateToEvents(page: Page) {
 /**
  * Apply filters for event search
  */
-async function applyFilters(page: Page) {
+async function applyFilters(page: Page): Promise<boolean> {
     console.log('Applying filters...');
 
     // Fleet filter (autocomplete input)
@@ -142,11 +142,24 @@ async function applyFilters(page: Page) {
     console.log('Submitting search...');
     await page.click('button.ui-button:has-text("Search")');
 
-    // Wait for search results table to appear and rows to be populated
-    console.log('Waiting for search results table to populate...');
-    await page.waitForSelector('#event-search-list tr.jqgrow', { state: 'attached', timeout: 60000 });
-
-    console.log('Filters applied and results loaded successfully');
+    // Wait for either: result rows OR "no results" state
+    // The grid always renders; if no rows, there are zero tr.jqgrow elements
+    console.log('Waiting for search results...');
+    try {
+        // Race: wait for result rows with a reasonable timeout
+        await page.waitForSelector('#event-search-list tr.jqgrow', { state: 'attached', timeout: 20000 });
+        console.log('Filters applied and results loaded successfully');
+        return true; // Results found
+    } catch (e) {
+        // No rows appeared — check if the grid loaded but is empty (valid zero-results)
+        const gridExists = await page.locator('#event-search-list').count() > 0;
+        if (gridExists) {
+            console.log('✅ Search completed — 0 events match the current filters. Nothing to process.');
+            return false; // No results, but not an error
+        }
+        // Grid itself didn't load — that's an actual error
+        throw e;
+    }
 }
 
 /**
@@ -241,9 +254,16 @@ test('Brazos data extraction workflow', async ({ page }) => {
         await navigateToEvents(page);
 
         // Phase 3: Apply filters
-        await applyFilters(page);
+        const hasResults = await applyFilters(page);
 
-        // Phase 4: Download CSV
+        if (!hasResults) {
+            console.log('\n📋 No Level 3 events found matching filters. Workflow complete — nothing to process.');
+            await page.close();
+            await page.context().close();
+            process.exit(0);
+        }
+
+        // Phase 4: Download CSV (only if there are results)
         const csvPath = await downloadData(page);
 
         console.log('Workflow completed successfully');

@@ -8,6 +8,12 @@ interface TerminalLogsProps {
     logs: { type: string; content: string }[];
 }
 
+const logColors: Record<string, string> = {
+    error: 'var(--accent-red)',
+    system: 'var(--accent-primary)',
+    info: 'var(--accent-green)',
+};
+
 const TerminalLogs: React.FC<TerminalLogsProps> = ({ logs }) => {
     const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -19,19 +25,18 @@ const TerminalLogs: React.FC<TerminalLogsProps> = ({ logs }) => {
 
     return (
         <Card
-            title={<><CodeOutlined /> LIVE EXECUTION LOGS</>}
-            style={{
-                background: '#0a0a0c',
-                border: '1px solid #2d2d34',
-                borderRadius: 12,
-                boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
-                height: '400px',
-                display: 'flex',
-                flexDirection: 'column'
-            }}
+            title={
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span>
+                        <CodeOutlined style={{ marginRight: 8 }} />
+                        LIVE EXECUTION LOGS
+                    </span>
+                    <span className="pulse-dot pulse-dot--green" />
+                </div>
+            }
+            style={{ height: 380, display: 'flex', flexDirection: 'column' }}
             styles={{
-                body: { padding: '12px', flex: 1, overflow: 'hidden' },
-                header: { borderBottom: '1px solid #2d2d34', color: '#1890ff' }
+                body: { padding: '12px 16px', flex: 1, overflow: 'hidden' },
             }}
         >
             <div
@@ -39,23 +44,28 @@ const TerminalLogs: React.FC<TerminalLogsProps> = ({ logs }) => {
                 style={{
                     height: '100%',
                     overflowY: 'auto',
-                    fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace',
-                    fontSize: '12px',
-                    lineHeight: '1.6',
-                    color: '#d1d1d1'
+                    fontFamily: "'JetBrains Mono', 'SFMono-Regular', Consolas, monospace",
+                    fontSize: 11,
+                    lineHeight: 1.7,
+                    color: 'var(--text-secondary)',
                 }}
             >
-                {logs.length === 0 && <div style={{ color: '#4a4a4e', textAlign: 'center', marginTop: '40px' }}>Waiting for system events...</div>}
+                {logs.length === 0 && (
+                    <div style={{ color: 'var(--text-tertiary)', textAlign: 'center', marginTop: 60, fontSize: 12 }}>
+                        Waiting for system events...
+                    </div>
+                )}
                 {logs.map((log, i) => (
-                    <div key={i} style={{ marginBottom: '4px' }}>
+                    <div key={i} style={{ marginBottom: 2 }}>
                         <Text style={{
-                            color: log.type === 'error' ? '#ff4d4f' : log.type === 'system' ? '#1890ff' : '#52c41a',
-                            marginRight: '8px',
-                            fontWeight: 'bold'
+                            color: logColors[log.type] || 'var(--text-secondary)',
+                            marginRight: 6,
+                            fontWeight: 600,
+                            fontSize: 10,
                         }}>
                             [{log.type.toUpperCase()}]
                         </Text>
-                        <Text style={{ color: '#d1d1d1' }}>{log.content}</Text>
+                        <span style={{ color: 'var(--text-primary)', fontSize: 11 }}>{log.content}</span>
                     </div>
                 ))}
             </div>

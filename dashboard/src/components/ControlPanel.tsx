@@ -1,12 +1,6 @@
 import React, { useState } from 'react';
-import { Card, Button, Space, Tooltip, Typography, Divider } from 'antd';
-import {
-    SyncOutlined,
-    CameraOutlined,
-    NotificationOutlined,
-    ThunderboltOutlined,
-    RocketOutlined
-} from '@ant-design/icons';
+import { Card, Button, Space, Tooltip, Typography } from 'antd';
+import { ThunderboltOutlined } from '@ant-design/icons';
 import { Socket } from 'socket.io-client';
 
 const { Text } = Typography;
@@ -21,70 +15,58 @@ const ControlPanel: React.FC<ControlPanelProps> = ({ socket, onRefresh }) => {
 
     React.useEffect(() => {
         if (!socket) return;
-
         socket.on('workflow-complete', () => {
             setLoading(null);
             onRefresh();
         });
-
-        return () => {
-            socket.off('workflow-complete');
-        };
+        return () => { socket.off('workflow-complete'); };
     }, [socket, onRefresh]);
 
     const trigger = (event: string, actionName: string) => {
         if (!socket) return;
         setLoading(actionName);
         socket.emit(event);
-
-        // Safety timeout for manual steps, but 'full' relies on workflow-complete
         if (actionName !== 'full') {
-            setTimeout(() => {
-                setLoading(null);
-                onRefresh();
-            }, 10000);
+            setTimeout(() => { setLoading(null); onRefresh(); }, 10000);
         }
     };
 
     return (
         <Card
-            title={<><ThunderboltOutlined style={{ color: '#faad14' }} /> OPERATION CONTROL</>}
-            style={{
-                background: '#141418',
-                border: '1px solid #2d2d34',
-                borderRadius: 12,
-                boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
-            }}
-            styles={{ header: { borderBottom: '1px solid #2d2d34', color: '#fff' } }}
+            title={
+                <span>
+                    <ThunderboltOutlined style={{ color: 'var(--accent-primary)', marginRight: 8 }} />
+                    OPERATION CONTROL
+                </span>
+            }
         >
             <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                {/* Workflow Button */}
                 <Tooltip title="Scrape, Ingest, Capture, and Notify in one click">
                     <Button
                         block
                         type="primary"
                         size="large"
+                        className="workflow-btn"
                         icon={<ThunderboltOutlined spin={loading === 'full'} />}
                         onClick={() => trigger('run-full-workflow', 'full')}
                         disabled={!!loading}
-                        style={{
-                            height: '64px',
-                            fontWeight: 'bold',
-                            fontSize: '16px',
-                            background: 'linear-gradient(90deg, #1d39c4 0%, #722ed1 100%)',
-                            border: 'none'
-                        }}
+                        style={{ height: 56, fontSize: 14 }}
                     >
                         RUN WORKFLOW
                     </Button>
                 </Tooltip>
 
-
-
-                <Divider style={{ borderColor: '#2d2d34', margin: '12px 0' }} />
-
+                {/* System Status */}
                 <div style={{ textAlign: 'center' }}>
-                    <Text type="secondary" style={{ fontSize: '12px' }}>
-                        System Status: <Text style={{ color: socket ? '#52c41a' : '#ff4d4f' }}>{socket ? 'CONNECTED' : 'OFFLINE'}</Text>
+                    <Text style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
+                        System Status:{' '}
+                        <Text className="mono-data" style={{
+                            color: socket ? 'var(--accent-green)' : 'var(--accent-red)',
+                            fontWeight: 600,
+                        }}>
+                            {socket ? 'CONNECTED' : 'OFFLINE'}
+                        </Text>
                     </Text>
                 </div>
             </Space>

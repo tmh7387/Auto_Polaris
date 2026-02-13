@@ -16,6 +16,7 @@
     "clsx": "^2.1.1",
     "framer-motion": "^12.33.0",
     "lucide-react": "^0.563.0",
+    "qrcode.react": "^4.2.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "socket.io-client": "^4.8.3",
