@@ -265,7 +265,7 @@ body {
    LAYOUT
    ---------------------------------------------------------------- */
 .app-shell {
-  min-height: 100vh;
+  height: 100vh;
   width: 100%;
   display: flex;
   overflow: hidden;
@@ -416,6 +416,7 @@ body {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
 }
 
 /* ---- Header ---- */
@@ -529,7 +530,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 24px;
-  overflow: hidden;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* ----------------------------------------------------------------
