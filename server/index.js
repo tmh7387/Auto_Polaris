@@ -75,6 +75,51 @@ app.get('/api/events', async (req, res) => {
     }
 });
 
+// Ingestion History
+app.get('/api/imports', async (req, res) => {
+    try {
+        const db = await getDb();
+        if (!db) return res.json([]);
+        const stmt = db.prepare(`
+            SELECT * FROM data_imports ORDER BY imported_at DESC
+        `);
+        const rows = [];
+        while (stmt.step()) rows.push(stmt.getAsObject());
+        stmt.free();
+        db.close();
+        res.json(rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Notification Logs
+app.get('/api/notifications', async (req, res) => {
+    try {
+        const db = await getDb();
+        if (!db) return res.json([]);
+        const stmt = db.prepare(`
+            SELECT 
+                nl.*,
+                fe.polaris_ref,
+                fe.event_name,
+                f.tail_number,
+                f.flight_date
+            FROM notification_log nl
+            LEFT JOIN flight_events fe ON nl.event_id = fe.id
+            LEFT JOIN flights f ON fe.flight_id = f.id
+            ORDER BY nl.sent_at DESC
+        `);
+        const rows = [];
+        while (stmt.step()) rows.push(stmt.getAsObject());
+        stmt.free();
+        db.close();
+        res.json(rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Run commands and stream logs
 function runCommand(command, args, socket) {
     return new Promise((resolve) => {
@@ -129,7 +174,48 @@ io.on('connection', (socket) => {
 
         // Step 1: Scrape
         socket.emit('log', { type: 'system', content: 'Phase 1/5: Scraping Polaris...' });
-        await runCommand('npx', ['playwright', 'test', 'resources/brazos_workflow.spec.ts', '--headed', '--reporter=line'], socket);
+
+        // Record CSV count before scraping to detect if a new one was created
+        const csvDir = 'input_csvs';
+        const csvsBefore = fs.existsSync(csvDir) ? fs.readdirSync(csvDir).length : 0;
+
+        const scrapeCode = await runCommand('npx', ['playwright', 'test', 'resources/brazos_workflow.spec.ts', '--headed', '--reporter=line'], socket);
+
+        // Check if scraping produced a new CSV
+        const csvsAfter = fs.existsSync(csvDir) ? fs.readdirSync(csvDir).length : 0;
+        const newCsvProduced = csvsAfter > csvsBefore;
+
+        if (!newCsvProduced) {
+            // Close notified events — they're no longer pending in Polaris
+            try {
+                const db = await getDb();
+                if (db) {
+                    const countStmt = db.prepare(`SELECT COUNT(*) as cnt FROM flight_events WHERE analysis_status = 'NOTIFIED' AND polaris_status = 'PENDING'`);
+                    countStmt.step();
+                    const { cnt } = countStmt.getAsObject();
+                    countStmt.free();
+
+                    if (cnt > 0) {
+                        db.run(`UPDATE flight_events SET polaris_status = 'CLOSED' WHERE analysis_status = 'NOTIFIED' AND polaris_status = 'PENDING'`);
+                        // Persist changes back to disk
+                        const data = db.export();
+                        const buffer = Buffer.from(data);
+                        fs.writeFileSync(DB_PATH, buffer);
+                        socket.emit('log', { type: 'system', content: `🗄️ Closed ${cnt} previously notified event(s) — no longer pending in Polaris.` });
+                        console.log(`Closed ${cnt} notified events`);
+                    }
+                    db.close();
+                }
+            } catch (closeErr) {
+                console.error('Close step failed (non-fatal):', closeErr.message);
+                socket.emit('log', { type: 'error', content: `Close step failed: ${closeErr.message}` });
+            }
+
+            socket.emit('log', { type: 'system', content: '📋 No new events found in Polaris. Workflow complete — nothing to process.' });
+            socket.emit('workflow-complete');
+            console.log('✅ WORKFLOW COMPLETED (no new events)');
+            return;
+        }
 
         // Step 2: Ingest
         socket.emit('log', { type: 'system', content: 'Phase 2/5: Ingesting Data...' });

@@ -22,6 +22,8 @@ interface DBEvent {
     tail_number: string;
     flight_date: string;
     departure_time: string;
+    event_code: string;
+    threshold_value: string;
 }
 
 const CONFIG = {
@@ -189,58 +191,23 @@ async function createDraft(page: any, event: DBEvent) {
     await page.keyboard.press('Tab');
     await page.waitForTimeout(1000);
 
-    // 3. Fill Body
-    console.log('Injecting HTML Body with Inline Images...');
-    const flightUrl = `${CONFIG.polarisBaseUrl}/flight/${ref}/`;
-
-    // Prepare Inline Images (Base64)
-    let pfdHtml = '';
-    let tableHtml = '';
-
-    // Check for standard V2 names "pfd.png" / "table.png"
-    const pfdPath = path.join(eventDir, 'pfd.png');
-    const tablePath = path.join(eventDir, 'table.png');
-
-    if (fs.existsSync(pfdPath)) {
-        const pfdBase64 = fs.readFileSync(pfdPath, { encoding: 'base64' });
-        pfdHtml = `
-            <h3>Visual Evidence (PFD)</h3>
-            <img src="data:image/png;base64,${pfdBase64}" style="width: 100%; max-width: 600px; border: 1px solid #ccc; display: block;" alt="PFD Screenshot">
-        `;
+    // 3. Fill Body (V1 Logic: read pre-generated email_draft.html)
+    console.log('Injecting HTML Body...');
+    const htmlDraftPath = path.join(eventDir, 'email_draft.html');
+    if (fs.existsSync(htmlDraftPath)) {
+        const htmlDraft = fs.readFileSync(htmlDraftPath, 'utf-8');
+        await page.evaluate(({ content }: { content: string }) => {
+            const editor = document.querySelector('div[role="textbox"][aria-label="Message body"]') as HTMLElement | null ||
+                document.querySelector('div[aria-label="Message body"]') as HTMLElement | null ||
+                document.querySelector('.Editor') as HTMLElement | null;
+            if (editor) {
+                editor.innerHTML = content;
+                editor.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+        }, { content: htmlDraft });
+    } else {
+        console.warn(`⚠️ No email_draft.html found at ${htmlDraftPath}`);
     }
-
-    if (fs.existsSync(tablePath)) {
-        const tableBase64 = fs.readFileSync(tablePath, { encoding: 'base64' });
-        tableHtml = `
-            <h3>Parameter Table</h3>
-            <img src="data:image/png;base64,${tableBase64}" style="width: 100%; max-width: 600px; border: 1px solid #ccc; display: block; margin-top: 10px;" alt="Table Screenshot">
-        `;
-    }
-
-    const emailHtml = `
-        <p>Hi WESTPAC FDM Team,</p>
-        <p>BSS has identified Level 3 event - ${event.event_name}</p>
-        <p>Aircraft: ${event.tail_number} | Date: ${event.flight_date}</p>
-        <p>The link to the event is below:<br>
-        <a href="${flightUrl}">${flightUrl}</a></p>
-        
-        <div style="margin-top: 20px; border-top: 1px solid #eee; padding-top: 10px;">
-            ${pfdHtml}
-            ${tableHtml}
-        </div>
-
-        <p style="margin-top: 20px;">Detailed evidence files are also attached below.</p>
-    `;
-
-    await page.evaluate(({ content }: { content: string }) => {
-        const editor = document.querySelector('div[role="textbox"][aria-label="Message body"]') as HTMLElement | null ||
-            document.querySelector('div[aria-label="Message body"]') as HTMLElement | null ||
-            document.querySelector('.Editor') as HTMLElement | null;
-        if (editor) {
-            editor.innerHTML = content;
-            editor.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-    }, { content: emailHtml });
     await page.waitForTimeout(2000);
 
     // 4. Attachments (V1 Dynamic Logic)
