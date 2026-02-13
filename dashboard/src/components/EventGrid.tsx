@@ -1,8 +1,5 @@
 import React from 'react';
-import { Table, Space, Tooltip, Typography } from 'antd';
-import { MailOutlined, WhatsAppOutlined } from '@ant-design/icons';
-
-const { Text } = Typography;
+import { Activity, Mail, MessageSquare } from 'lucide-react';
 
 interface EventGridProps {
     events: any[];
@@ -17,86 +14,78 @@ const statusConfig: Record<string, { className: string; label: string }> = {
 };
 
 const EventGrid: React.FC<EventGridProps> = ({ events }) => {
-    const columns = [
-        {
-            title: 'Reference',
-            dataIndex: 'polaris_ref',
-            key: 'ref',
-            width: 100,
-            render: (text: string) => (
-                <a
-                    href={`https://polaris.flightdataservices.com/event/${text}/`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mono-data"
-                    style={{ color: 'var(--accent-primary)', fontWeight: 600, whiteSpace: 'nowrap' }}
-                >
-                    {text}
-                </a>
-            ),
-        },
-        {
-            title: 'Event Short Desc',
-            dataIndex: 'event_name',
-            key: 'event',
-            ellipsis: true,
-            render: (text: string) => (
-                <Text style={{ color: 'var(--text-primary)', fontSize: 13 }}>{text}</Text>
-            ),
-        },
-        {
-            title: 'Date',
-            dataIndex: 'flight_date',
-            key: 'date',
-            width: 110,
-            render: (text: string) => (
-                <Text className="mono-data" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{text}</Text>
-            ),
-        },
-        {
-            title: 'Delivery',
-            key: 'delivery',
-            width: 70,
-            align: 'center' as const,
-            render: (_: any, record: any) => (
-                <Space size={4}>
-                    <Tooltip title={`Email: ${record.email_status || 'PENDING'}`}>
-                        <MailOutlined style={{
-                            color: record.email_status === 'DRAFTED' ? 'var(--accent-green)' : 'var(--text-tertiary)',
-                            fontSize: 14,
-                        }} />
-                    </Tooltip>
-                    <Tooltip title={`WhatsApp: ${record.whatsapp_status || 'PENDING'}`}>
-                        <WhatsAppOutlined style={{
-                            color: record.whatsapp_status === 'SENT' ? 'var(--accent-green)' : 'var(--text-tertiary)',
-                            fontSize: 14,
-                        }} />
-                    </Tooltip>
-                </Space>
-            ),
-        },
-        {
-            title: 'Status',
-            dataIndex: 'analysis_status',
-            key: 'status',
-            width: 90,
-            align: 'center' as const,
-            render: (status: string) => {
-                const cfg = statusConfig[status] || { className: 'status-tag', label: status };
-                return <span className={cfg.className}>{cfg.label}</span>;
-            },
-        },
-    ];
-
     return (
-        <Table
-            dataSource={events}
-            columns={columns}
-            rowKey="id"
-            pagination={{ pageSize: 8, size: 'small' }}
-            size="small"
-            style={{ background: 'transparent' }}
-        />
+        <div className="events-table-wrap custom-scrollbar">
+            <table className="events-table">
+                <thead>
+                    <tr>
+                        <th>Reference</th>
+                        <th>Event Short Desc</th>
+                        <th>Date</th>
+                        <th>Delivery</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {events.length === 0 ? (
+                        <tr>
+                            <td colSpan={5}>
+                                <div className="events-empty">
+                                    <Activity size={56} strokeWidth={1} className="events-empty-icon" />
+                                    <p className="events-empty-text">Scanning for anomalies...</p>
+                                </div>
+                            </td>
+                        </tr>
+                    ) : (
+                        events.map((event: any) => (
+                            <tr key={event.id}>
+                                <td>
+                                    <a
+                                        href={`https://polaris.flightdataservices.com/event/${event.polaris_ref}/`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="ref-link"
+                                    >
+                                        {event.polaris_ref}
+                                    </a>
+                                </td>
+                                <td>{event.event_name}</td>
+                                <td style={{ opacity: 0.6 }}>{event.flight_date}</td>
+                                <td>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <Mail
+                                            size={14}
+                                            style={{
+                                                color: event.email_status === 'DRAFTED'
+                                                    ? 'var(--accent-green)'
+                                                    : 'var(--text-muted)',
+                                            }}
+                                        />
+                                        <MessageSquare
+                                            size={14}
+                                            style={{
+                                                color: event.whatsapp_status === 'SENT'
+                                                    ? 'var(--accent-green)'
+                                                    : 'var(--text-muted)',
+                                            }}
+                                        />
+                                    </div>
+                                </td>
+                                <td>
+                                    {(() => {
+                                        const cfg = statusConfig[event.analysis_status] || {
+                                            className: 'status-tag',
+                                            label: event.analysis_status,
+                                        };
+                                        return <span className={cfg.className}>{cfg.label}</span>;
+                                    })()}
+                                </td>
+                            </tr>
+                        ))
+                    )}
+                </tbody>
+            </table>
+        </div>
     );
 };
 

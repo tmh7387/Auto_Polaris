@@ -1,9 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Typography, Space, Tooltip, message } from 'antd';
-import { WhatsAppOutlined, QrcodeOutlined, CheckCircleOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { MessageSquare, QrCode, CheckCircle, Clock } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-
-const { Text } = Typography;
 
 const SANDBOX_NUMBER = '+14155238886';
 const SANDBOX_JOIN_CODE = 'join sugar-fox';
@@ -53,97 +50,85 @@ const WhatsAppSetup: React.FC = () => {
         localStorage.setItem(HANDSHAKE_KEY, now.toString());
         setLastHandshake(now);
         setShowQR(false);
-        message.success('Sandbox handshake recorded! Timer reset to 24 hours.');
     };
 
     return (
-        <Card
-            size="small"
-            title={
-                <span>
-                    <WhatsAppOutlined style={{ color: 'var(--accent-green)', marginRight: 8 }} />
-                    WhatsApp Sandbox
-                </span>
-            }
-            extra={
-                <span className={`status-tag ${isExpired ? 'status-tag--red' : 'status-tag--green'}`}>
-                    {isExpired ? (
-                        <><ClockCircleOutlined style={{ marginRight: 4 }} />EXPIRED</>
-                    ) : (
-                        <><CheckCircleOutlined style={{ marginRight: 4 }} />ACTIVE</>
-                    )}
-                </span>
-            }
-            style={{ marginBottom: 16 }}
-        >
-            {/* Status Row */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <Text style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
-                    {lastHandshake ? `Last: ${new Date(lastHandshake).toLocaleString()}` : 'Never connected'}
-                </Text>
-                <Text className="mono-data" style={{
-                    color: isExpired ? 'var(--accent-red)' : 'var(--accent-green)',
-                    fontSize: 11,
-                    fontWeight: 600,
-                }}>
-                    {timeRemaining}
-                </Text>
-            </div>
-
-            {/* QR Code Area */}
-            {showQR ? (
-                <div style={{ textAlign: 'center', padding: '12px 0' }}>
-                    <div style={{
-                        background: '#fff',
-                        display: 'inline-block',
-                        padding: 14,
-                        borderRadius: 10,
-                        marginBottom: 10,
-                        boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
-                    }}>
-                        <QRCodeSVG value={waLink} size={160} level="M" includeMargin={false} />
+        <div className="aero-panel">
+            <div className="aero-panel-body">
+                {/* Header */}
+                <div className="sandbox-header">
+                    <div className="sandbox-header-left">
+                        <MessageSquare size={14} style={{ color: 'var(--accent-green)' }} />
+                        <span className="aero-panel-label" style={{ fontSize: 10, letterSpacing: '0.2em' }}>
+                            External Sandbox
+                        </span>
                     </div>
-                    <div style={{ marginBottom: 10 }}>
-                        <Text style={{ color: 'var(--text-secondary)', fontSize: 10, display: 'block' }}>
-                            Scan with camera, then tap Send in WhatsApp
-                        </Text>
-                        <Text className="mono-data" style={{ color: 'var(--accent-primary)', marginTop: 4, display: 'block' }}>
-                            {SANDBOX_JOIN_CODE}
-                        </Text>
-                    </div>
-                    <Space>
-                        <Button
-                            type="primary"
-                            icon={<CheckCircleOutlined />}
-                            onClick={markHandshakeComplete}
-                            style={{ background: 'var(--accent-green)', borderColor: 'var(--accent-green)' }}
-                        >
-                            I've Sent It
-                        </Button>
-                        <Button onClick={() => setShowQR(false)} style={{ color: 'var(--text-secondary)' }}>
-                            Cancel
-                        </Button>
-                    </Space>
+                    <span className={`sandbox-status-badge ${isExpired ? 'sandbox-status-badge--expired' : 'sandbox-status-badge--active'}`}>
+                        {isExpired ? 'Expired' : 'Active'}
+                    </span>
                 </div>
-            ) : (
-                <Tooltip title={isExpired ? 'Sandbox expired — scan to reconnect' : 'Reset the 24hr timer'}>
-                    <Button
-                        block
-                        icon={<QrcodeOutlined />}
+
+                {/* Handshake State */}
+                <div className="sandbox-meta">
+                    <span>Handshake State:</span>
+                    <span style={{ color: isExpired ? 'var(--accent-red)' : 'var(--accent-green)' }}>
+                        {isExpired ? 'Fail' : timeRemaining}
+                    </span>
+                </div>
+
+                {/* QR Code Area */}
+                {showQR ? (
+                    <div style={{ textAlign: 'center' }}>
+                        <div className="qr-section">
+                            <div style={{
+                                background: '#fff',
+                                display: 'inline-block',
+                                padding: 14,
+                                borderRadius: 10,
+                                boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+                            }}>
+                                <QRCodeSVG value={waLink} size={140} level="M" includeMargin={false} />
+                            </div>
+                            <span style={{
+                                fontFamily: "'JetBrains Mono', monospace",
+                                fontSize: 10,
+                                color: 'var(--text-muted)',
+                            }}>
+                                Scan → Send "{SANDBOX_JOIN_CODE}"
+                            </span>
+                            <span className="mono-data" style={{ color: 'var(--accent-primary)', fontSize: 11 }}>
+                                {SANDBOX_JOIN_CODE}
+                            </span>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                            <button
+                                className="gradient-btn"
+                                style={{ padding: '10px 16px', fontSize: 9 }}
+                                onClick={markHandshakeComplete}
+                            >
+                                <CheckCircle size={14} />
+                                I've Sent It
+                            </button>
+                            <button
+                                className="secondary-btn"
+                                style={{ padding: '10px 16px', fontSize: 9, width: 'auto' }}
+                                onClick={() => setShowQR(false)}
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                ) : (
+                    <button
+                        className="secondary-btn"
                         onClick={() => setShowQR(true)}
-                        style={{
-                            background: isExpired ? 'var(--accent-green)' : 'transparent',
-                            borderColor: isExpired ? 'var(--accent-green)' : 'var(--glass-border)',
-                            color: isExpired ? '#fff' : 'var(--text-secondary)',
-                            fontWeight: isExpired ? 600 : 400,
-                            letterSpacing: 0.5,
-                        }}
                     >
+                        <QrCode size={14} />
                         {isExpired ? 'Reconnect Sandbox' : 'Reset Handshake'}
-                    </Button>
-                </Tooltip>
-            )}
-        </Card>
+                    </button>
+                )}
+            </div>
+        </div>
     );
 };
 

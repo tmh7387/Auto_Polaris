@@ -146,9 +146,9 @@ The tactical dashboard provides real-time visibility into the workflow:
 | **Notification Logs** | Full email and WhatsApp delivery history with event cross-references |
 
 ### Design System
-- **Glassmorphism** — Frosted glass panels with backdrop-blur
+- **Glassmorphism** — AeroCore design with aircraft background overlay
 - **Dark/Light Mode** — Toggle via header button, persisted in localStorage
-- **Tactical Typography** — Inter for UI, JetBrains Mono for data/logs
+- **Tactical Typography** — Plus Jakarta Sans for UI, JetBrains Mono for data/logs
 - **Accent Palette** — Cyan/green accents (dark), blue accents (light)
 - **Real-Time Updates** — Socket.io streams execution logs directly to the dashboard
 
@@ -297,7 +297,7 @@ The following are generated locally and not committed:
 
 | Layer | Technology |
 |-------|-----------|
-| **Dashboard** | React 19, Vite 7, Ant Design 6, TypeScript |
+| **Dashboard** | React 19, Vite 7, Native CSS (AeroCore), TypeScript |
 | **Server** | Express 5, Socket.io 4, sql.js (WebAssembly SQLite) |
 | **Automation** | Playwright (Chromium) |
 | **Database** | SQLite (via sql.js, file-based) |

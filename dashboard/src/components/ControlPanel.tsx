@@ -1,9 +1,6 @@
 import React, { useState } from 'react';
-import { Card, Button, Space, Tooltip, Typography } from 'antd';
-import { ThunderboltOutlined } from '@ant-design/icons';
+import { Zap } from 'lucide-react';
 import { Socket } from 'socket.io-client';
-
-const { Text } = Typography;
 
 interface ControlPanelProps {
     socket: Socket | null;
@@ -32,45 +29,35 @@ const ControlPanel: React.FC<ControlPanelProps> = ({ socket, onRefresh }) => {
     };
 
     return (
-        <Card
-            title={
-                <span>
-                    <ThunderboltOutlined style={{ color: 'var(--accent-primary)', marginRight: 8 }} />
-                    OPERATION CONTROL
-                </span>
-            }
-        >
-            <Space direction="vertical" style={{ width: '100%' }} size="middle">
-                {/* Workflow Button */}
-                <Tooltip title="Scrape, Ingest, Capture, and Notify in one click">
-                    <Button
-                        block
-                        type="primary"
-                        size="large"
-                        className="workflow-btn"
-                        icon={<ThunderboltOutlined spin={loading === 'full'} />}
-                        onClick={() => trigger('run-full-workflow', 'full')}
-                        disabled={!!loading}
-                        style={{ height: 56, fontSize: 14 }}
-                    >
-                        RUN WORKFLOW
-                    </Button>
-                </Tooltip>
-
-                {/* System Status */}
-                <div style={{ textAlign: 'center' }}>
-                    <Text style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
-                        System Status:{' '}
-                        <Text className="mono-data" style={{
-                            color: socket ? 'var(--accent-green)' : 'var(--accent-red)',
-                            fontWeight: 600,
-                        }}>
-                            {socket ? 'CONNECTED' : 'OFFLINE'}
-                        </Text>
-                    </Text>
+        <div className="aero-panel">
+            <div className="aero-panel-body">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 32 }}>
+                    <Zap size={14} style={{ color: 'var(--accent-primary)' }} />
+                    <span className="aero-panel-label" style={{ fontSize: 10, letterSpacing: '0.2em' }}>
+                        Operation Control
+                    </span>
                 </div>
-            </Space>
-        </Card>
+
+                <button
+                    className="gradient-btn"
+                    onClick={() => trigger('run-full-workflow', 'full')}
+                    disabled={!!loading}
+                >
+                    <Zap size={16} fill="white" />
+                    {loading === 'full' ? 'Running...' : 'Run Workflow'}
+                </button>
+
+                <div className="system-link">
+                    <span style={{ color: 'var(--text-muted)' }}>System Link:</span>
+                    <span style={{
+                        color: socket ? 'var(--accent-green)' : 'var(--accent-red)',
+                        animation: socket ? 'subtle-pulse 2s infinite ease-in-out' : 'none',
+                    }}>
+                        {socket ? 'Active' : 'Disconnected'}
+                    </span>
+                </div>
+            </div>
+        </div>
     );
 };
 
