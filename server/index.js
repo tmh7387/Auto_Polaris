@@ -172,21 +172,39 @@ io.on('connection', (socket) => {
         console.log('🚀 Triggering FULL AUTOMATED WORKFLOW...');
         socket.emit('log', { type: 'system', content: '🚀 STARTING FULL AUTOMATED WORKFLOW' });
 
+        // Reset all phases for the dashboard stepper
+        const PHASES = [
+            { phase: 1, label: 'Scraping Polaris' },
+            { phase: 2, label: 'Ingesting Data' },
+            { phase: 3, label: 'Capturing Evidence' },
+            { phase: 4, label: 'Generating Drafts' },
+            { phase: 5, label: 'Sending Notifications' },
+        ];
+        socket.emit('workflow-reset', PHASES.map(p => ({ ...p, status: 'pending', result: '' })));
+
+        // Helper to emit phase updates
+        const emitPhase = (phase, status, result = '') => {
+            const p = PHASES.find(x => x.phase === phase);
+            socket.emit('workflow-phase', { phase, status, label: p?.label || '', result });
+        };
+
         // Step 1: Scrape
+        emitPhase(1, 'running');
         socket.emit('log', { type: 'system', content: 'Phase 1/5: Scraping Polaris...' });
 
-        // Record CSV count before scraping to detect if a new one was created
         const csvDir = 'input_csvs';
         const csvsBefore = fs.existsSync(csvDir) ? fs.readdirSync(csvDir).length : 0;
 
         const scrapeCode = await runCommand('npx', ['playwright', 'test', 'resources/brazos_workflow.spec.ts', '--headed', '--reporter=line'], socket);
 
-        // Check if scraping produced a new CSV
         const csvsAfter = fs.existsSync(csvDir) ? fs.readdirSync(csvDir).length : 0;
         const newCsvProduced = csvsAfter > csvsBefore;
 
         if (!newCsvProduced) {
-            // Close notified events — they're no longer pending in Polaris
+            emitPhase(1, 'done', 'No new CSV produced');
+
+            // Close notified events
+            let closedCount = 0;
             try {
                 const db = await getDb();
                 if (db) {
@@ -196,8 +214,8 @@ io.on('connection', (socket) => {
                     countStmt.free();
 
                     if (cnt > 0) {
+                        closedCount = cnt;
                         db.run(`UPDATE flight_events SET polaris_status = 'CLOSED' WHERE analysis_status = 'NOTIFIED' AND polaris_status = 'PENDING'`);
-                        // Persist changes back to disk
                         const data = db.export();
                         const buffer = Buffer.from(data);
                         fs.writeFileSync(DB_PATH, buffer);
@@ -211,30 +229,48 @@ io.on('connection', (socket) => {
                 socket.emit('log', { type: 'error', content: `Close step failed: ${closeErr.message}` });
             }
 
-            socket.emit('log', { type: 'system', content: '📋 No new events found in Polaris. Workflow complete — nothing to process.' });
-            socket.emit('workflow-complete');
+            // Mark remaining phases as skipped
+            for (let i = 2; i <= 5; i++) {
+                emitPhase(i, 'skipped', 'No new events');
+            }
+
+            const resultMsg = closedCount > 0
+                ? `Closed ${closedCount} notified event(s) — no new events to process`
+                : 'No new events found in Polaris — nothing to process';
+            socket.emit('log', { type: 'system', content: `📋 ${resultMsg}` });
+            socket.emit('workflow-complete', { result: resultMsg });
             console.log('✅ WORKFLOW COMPLETED (no new events)');
             return;
         }
 
+        emitPhase(1, 'done', `New CSV detected (${csvsAfter - csvsBefore} file(s))`);
+
         // Step 2: Ingest
+        emitPhase(2, 'running');
         socket.emit('log', { type: 'system', content: 'Phase 2/5: Ingesting Data...' });
         await runCommand('node', ['ops/ingest_csv.js'], socket);
+        emitPhase(2, 'done', 'Data ingested');
 
         // Step 3: Capture
+        emitPhase(3, 'running');
         socket.emit('log', { type: 'system', content: 'Phase 3/5: Capturing Evidence...' });
         await runCommand('npx', ['playwright', 'test', 'resources/notification_generator.spec.ts', '--headed', '--reporter=line'], socket);
+        emitPhase(3, 'done', 'Evidence captured');
 
         // Step 4: Draft
+        emitPhase(4, 'running');
         socket.emit('log', { type: 'system', content: 'Phase 4/5: Generating Drafts...' });
         await runCommand('npx', ['playwright', 'test', 'resources/outlook_draft_generator.spec.ts', '--headed', '--reporter=line'], socket);
+        emitPhase(4, 'done', 'Drafts generated');
 
         // Step 5: Notify
+        emitPhase(5, 'running');
         socket.emit('log', { type: 'system', content: 'Phase 5/5: Sending WhatsApp Notifications...' });
         await runCommand('npx', ['ts-node', '--esm', 'resources/whatsapp_twilio_sender.ts'], socket);
+        emitPhase(5, 'done', 'Notifications sent');
 
         socket.emit('log', { type: 'system', content: '✅ FULL WORKFLOW COMPLETED SUCCESSFULLY' });
-        socket.emit('workflow-complete');
+        socket.emit('workflow-complete', { result: 'All 5 phases completed successfully' });
         console.log('✅ FULL WORKFLOW COMPLETED');
     });
 });

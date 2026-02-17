@@ -5,22 +5,26 @@ import {
   LayoutDashboard,
   History,
   Bell,
+  Terminal,
   ArrowRight,
   Sun,
   Moon,
 } from 'lucide-react';
 import { useTheme } from './theme/ThemeContext';
 import EventGrid from './components/EventGrid';
-import TerminalLogs from './components/TerminalLogs';
+import WorkflowProgress from './components/WorkflowProgress';
+import type { PhaseInfo } from './components/WorkflowProgress';
 import ControlPanel from './components/ControlPanel';
 import WhatsAppSetup from './components/WhatsAppSetup';
 import IngestionHistory from './components/IngestionHistory';
 import NotificationLogs from './components/NotificationLogs';
+import ExecutionLogsPage from './components/ExecutionLogsPage';
 
 const PAGE_TITLES: Record<string, string> = {
   '1': 'MISSION CONTROL',
   '2': 'INGESTION HISTORY',
   '3': 'NOTIFICATION LOGS',
+  '4': 'EXECUTION LOGS',
 };
 
 interface NavItemProps {
@@ -47,6 +51,8 @@ const App: React.FC = () => {
   const [logs, setLogs] = useState<{ type: string; content: string }[]>([]);
   const [events, setEvents] = useState<any[]>([]);
   const [activePage, setActivePage] = useState('1');
+  const [phases, setPhases] = useState<PhaseInfo[]>([]);
+  const [workflowResult, setWorkflowResult] = useState('');
 
   useEffect(() => {
     const newSocket = io('http://127.0.0.1:3001');
@@ -54,6 +60,22 @@ const App: React.FC = () => {
 
     newSocket.on('log', (log: { type: string; content: string }) => {
       setLogs(prev => [...prev.slice(-100), log]);
+    });
+
+    // Workflow progress events
+    newSocket.on('workflow-reset', (initialPhases: PhaseInfo[]) => {
+      setPhases(initialPhases);
+      setWorkflowResult('');
+    });
+
+    newSocket.on('workflow-phase', (update: PhaseInfo) => {
+      setPhases(prev =>
+        prev.map(p => p.phase === update.phase ? { ...p, ...update } : p)
+      );
+    });
+
+    newSocket.on('workflow-complete', (data: { result: string }) => {
+      setWorkflowResult(data?.result || 'Workflow complete');
     });
 
     fetchEvents();
@@ -86,6 +108,10 @@ const App: React.FC = () => {
           <div style={{ padding: 32, flex: 1, overflow: 'auto' }}>
             <NotificationLogs />
           </div>
+        );
+      case '4':
+        return (
+          <ExecutionLogsPage logs={logs} onClear={() => setLogs([])} />
         );
       default:
         return (
@@ -124,7 +150,7 @@ const App: React.FC = () => {
             <aside className="content-aside">
               <ControlPanel socket={socket} onRefresh={fetchEvents} />
               <WhatsAppSetup />
-              <TerminalLogs logs={logs} />
+              <WorkflowProgress phases={phases} workflowResult={workflowResult} />
             </aside>
           </div>
         );
@@ -166,6 +192,12 @@ const App: React.FC = () => {
             icon={<Bell size={18} />}
             label="Notification Logs"
             onClick={() => setActivePage('3')}
+          />
+          <NavItem
+            active={activePage === '4'}
+            icon={<Terminal size={18} />}
+            label="Execution Logs"
+            onClick={() => setActivePage('4')}
           />
         </nav>
 
