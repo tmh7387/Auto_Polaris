@@ -265,9 +265,7 @@ test('Brazos data extraction workflow', async ({ page }) => {
 
         if (!hasResults) {
             console.log('\n📋 No Level 3 events found matching filters. Workflow complete — nothing to process.');
-            await page.close();
-            await page.context().close();
-            process.exit(0);
+            return;
         }
 
         // Phase 4: Download CSV (only if there are results)
@@ -275,11 +273,6 @@ test('Brazos data extraction workflow', async ({ page }) => {
 
         console.log('Workflow completed successfully');
         if (csvPath) console.log('Data saved to:', csvPath);
-
-        // Explicitly close page and context to ensure process exits
-        await page.close();
-        await page.context().close();
-        process.exit(0);
 
     } catch (error) {
         console.error('Workflow failed:', error);

@@ -34,11 +34,11 @@ const CONFIG = {
 };
 
 test('Create Outlook drafts from DB events', async ({ page }) => {
-    const username = process.env.OUTLOOK_EMAIL;
-    const password = process.env.OUTLOOK_PASSWORD;
+    const username = 'ahouston@brazossafety.com';
+    const password = process.env.BRAZOS_PASSWORD;
 
     if (!username || !password) {
-        throw new Error('Outlook credentials (OUTLOOK_EMAIL, OUTLOOK_PASSWORD) not found in .env');
+        throw new Error('Outlook credentials (BRAZOS_PASSWORD) not found in .env');
     }
 
     // 1. Load Database and Query 'EVIDENCE_READY' Events

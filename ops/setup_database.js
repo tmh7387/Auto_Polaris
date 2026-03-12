@@ -52,6 +52,8 @@ async function main() {
             polaris_status TEXT DEFAULT 'PENDING', -- Added for status sync
             evidence_path TEXT,
             modified_text TEXT,                    -- Added for 'Modified' column from CSV
+            event_code TEXT,                       -- Event code from CSV
+            threshold_value TEXT,                  -- Threshold value from CSV
             FOREIGN KEY(flight_id) REFERENCES flights(id)
         );
 
