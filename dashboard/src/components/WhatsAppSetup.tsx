@@ -3,7 +3,7 @@ import { MessageSquare, QrCode, CheckCircle, Clock } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
 const SANDBOX_NUMBER = '+14155238886';
-const SANDBOX_JOIN_CODE = 'join sugar-fox';
+const SANDBOX_JOIN_CODE = 'join shaking-express';
 const HANDSHAKE_KEY = 'whatsapp_sandbox_handshake_ts';
 const EXPIRY_HOURS = 24;
 

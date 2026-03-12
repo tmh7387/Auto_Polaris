@@ -96,7 +96,6 @@ test('Generate notifications for pending events from DB', async ({ page }) => {
     fs.writeFileSync(CONFIG.dbPath, buffer);
     db.close();
     console.log('Database updated with processing results.');
-    process.exit(0);
 });
 
 async function processEvent(page: any, event: DBEvent, db: any) {
@@ -131,10 +130,22 @@ async function processEvent(page: any, event: DBEvent, db: any) {
     console.log(`Found Polaris Event ID: ${polarisEventId}`);
 
     // Navigate to the specific event moment
+    // Force a fresh page load with the event hash by navigating away first.
+    // This is necessary because page.goto() with only a hash change on the 
+    // same page doesn't trigger a full reload, so Polaris never jumps to the event time.
     const specificUrl = `${graphUrl}#event=${polarisEventId}`;
     console.log(`Navigating to specific moment: ${specificUrl}`);
+    await page.goto('about:blank');
     await page.goto(specificUrl);
     await page.waitForLoadState('networkidle');
+
+    // Wait for Polaris to select the event row in the data table
+    try {
+        await page.waitForSelector('tr.selected', { timeout: 15000 });
+        console.log('Event row selected — display at event time.');
+    } catch (e) {
+        console.warn('Timed out waiting for tr.selected, continuing...');
+    }
 
     // Settle time for rendering
     await page.waitForTimeout(3000);

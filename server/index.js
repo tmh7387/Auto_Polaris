@@ -165,7 +165,7 @@ io.on('connection', (socket) => {
     socket.on('run-notifications', () => {
         console.log('Triggering Notifications (HEADED)...');
         runCommand('npx', ['playwright', 'test', 'resources/outlook_draft_generator.spec.ts', '--headed'], socket);
-        runCommand('node', ['resources/whatsapp_twilio_sender.ts'], socket);
+        runCommand('npx', ['tsx', 'resources/whatsapp_twilio_sender.ts'], socket);
     });
 
     socket.on('run-full-workflow', async () => {
@@ -266,7 +266,7 @@ io.on('connection', (socket) => {
         // Step 5: Notify
         emitPhase(5, 'running');
         socket.emit('log', { type: 'system', content: 'Phase 5/5: Sending WhatsApp Notifications...' });
-        await runCommand('npx', ['ts-node', '--esm', 'resources/whatsapp_twilio_sender.ts'], socket);
+        await runCommand('npx', ['tsx', 'resources/whatsapp_twilio_sender.ts'], socket);
         emitPhase(5, 'done', 'Notifications sent');
 
         socket.emit('log', { type: 'system', content: '✅ FULL WORKFLOW COMPLETED SUCCESSFULLY' });

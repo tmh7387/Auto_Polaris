@@ -20,6 +20,47 @@ const CONFIG = {
     archiveDir: path.join(__dirname, '../archive')
 };
 
+const SCHEMA = `
+    CREATE TABLE IF NOT EXISTS data_imports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        filename TEXT NOT NULL,
+        imported_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        row_count INTEGER DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS flights (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tail_number TEXT NOT NULL,
+        flight_date TEXT NOT NULL,
+        departure_time TEXT NOT NULL,
+        from_airport TEXT,
+        to_airport TEXT,
+        UNIQUE(tail_number, flight_date, departure_time)
+    );
+    CREATE TABLE IF NOT EXISTS flight_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        flight_id INTEGER NOT NULL,
+        polaris_ref TEXT NOT NULL UNIQUE,
+        event_name TEXT NOT NULL,
+        severity_level TEXT NOT NULL,
+        parameter_value TEXT,
+        analysis_status TEXT DEFAULT 'NEW',
+        polaris_status TEXT DEFAULT 'PENDING',
+        evidence_path TEXT,
+        modified_text TEXT,
+        event_code TEXT,
+        threshold_value TEXT,
+        FOREIGN KEY(flight_id) REFERENCES flights(id)
+    );
+    CREATE TABLE IF NOT EXISTS notification_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_id INTEGER,
+        channel TEXT,
+        sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        status TEXT DEFAULT 'SENT',
+        FOREIGN KEY(event_id) REFERENCES flight_events(id)
+    );
+`;
+
 async function main() {
     const SQL = await initSqlJs();
 
@@ -35,15 +76,16 @@ async function main() {
         return;
     }
 
-    // Load existing database if it exists
+    // Load existing database if it exists, or auto-initialize
     let db;
     if (fs.existsSync(CONFIG.dbPath)) {
         const filebuffer = fs.readFileSync(CONFIG.dbPath);
         db = new SQL.Database(filebuffer);
     } else {
+        console.log("⚠️ Database not found — auto-initializing schema...");
         db = new SQL.Database();
-        // Run schema if it doesn't exist (fail-safe)
-        // (Assuming setup_database.js was already run)
+        db.run(SCHEMA);
+        console.log("✅ Database schema created.");
     }
 
     // PHASE 6: Status Sync - Mark all as CLOSED initially
