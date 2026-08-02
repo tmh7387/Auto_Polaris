@@ -83,7 +83,9 @@ async function sendWhatsAppNotifications() {
 
     for (const event of events) {
         const ref = event.polaris_ref;
-        const flightUrl = `${CONFIG.polarisBaseUrl}/flight/${ref}/`;
+        // Extract base flight number from compound ref (e.g. '71872739-LVD007' -> '71872739')
+        const flightNumber = ref.split('-')[0];
+        const flightUrl = `${CONFIG.polarisBaseUrl}/flight/${flightNumber}/`;
 
         // Helper to format date like "Feb 03, 2026"
         const formatDate = (dateStr: string) => {

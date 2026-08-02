@@ -98,20 +98,26 @@ test('Generate notifications for pending events from DB', async ({ page }) => {
     console.log('Database updated with processing results.');
 });
 
+// Extract base flight number from compound polaris_ref (e.g. '71872739-LVD007' -> '71872739')
+function getFlightNumber(polarisRef: string): string {
+    return polarisRef.split('-')[0];
+}
+
 async function processEvent(page: any, event: DBEvent, db: any) {
     const eventId = event.id;
     const ref = event.polaris_ref;
+    const flightNumber = getFlightNumber(ref);
     const eventDir = path.join(CONFIG.outputDir, eventId.toString());
     if (!fs.existsSync(eventDir)) fs.mkdirSync(eventDir, { recursive: true });
 
-    console.log(`Processing Event ID ${eventId} (Ref: ${ref})...`);
+    console.log(`Processing Event ID ${eventId} (Ref: ${ref}, Flight: ${flightNumber})...`);
 
     const eventTimeStr = `${event.flight_date} ${event.departure_time}`;
     const utcDate = new Date(eventTimeStr);
     const { localDateString, lightingCondition } = getEnrichedTime(utcDate);
 
-    // Navigate to Graph URL
-    const graphUrl = `${CONFIG.polarisBaseUrl}/flight/${ref}/graph/`;
+    // Navigate to Graph URL (use base flight number, not compound ref)
+    const graphUrl = `${CONFIG.polarisBaseUrl}/flight/${flightNumber}/graph/`;
     console.log(`Navigating to Base Graph: ${graphUrl}`);
     await page.goto(graphUrl);
     await page.waitForLoadState('networkidle');
@@ -185,11 +191,18 @@ async function processEvent(page: any, event: DBEvent, db: any) {
     // Generate email_draft.html (V1 Logic)
     const pfdBase64 = fs.readFileSync(pfdPath, { encoding: 'base64' });
     const tableBase64 = fs.readFileSync(tablePath, { encoding: 'base64' });
-    const flightUrl = `${CONFIG.polarisBaseUrl}/flight/${ref}/`;
+    const flightUrl = `${CONFIG.polarisBaseUrl}/flight/${flightNumber}/`;
 
     const emailHtml = generateEmailHtml(event, metadata, pfdBase64, tableBase64, flightUrl, lightingCondition);
     fs.writeFileSync(path.join(eventDir, 'email_draft.html'), emailHtml);
     console.log(`✓ email_draft.html generated for ${eventId}`);
+
+    // Generate whatsapp_draft.txt (V1 format)
+    const eventCode = (event as any).event_code || event.event_name;
+    const eventDate = new Date(`${event.flight_date}`).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
+    const whatsappText = `Hi WESTPAC FDM Team,\r\n\r\nBSS has identified Level 3 event – ${eventCode} - ${event.event_name} - ${eventDate}\r\n\r\nThe link to the event is below:\r\n${flightUrl}`;
+    fs.writeFileSync(path.join(eventDir, 'whatsapp_draft.txt'), whatsappText);
+    console.log(`✓ whatsapp_draft.txt generated for ${eventId}`);
 
     // Update DB status
     db.run(`
